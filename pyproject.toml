@@ -1,0 +1,44 @@
+[project]
+name = "card-reco"
+version = "0.1.0"
+description = "Pokemon card recognition from images using computer vision and perceptual hashing"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "imagehash>=4.3",
+    "requests>=2.31",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-requests>=2.31",
+    "types-tqdm>=4.66",
+    "opencv-contrib-python-stubs>=0.0.2",
+]
+
+[project.scripts]
+card-reco = "card_reco.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+src = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,49 @@
+{
+    "annotations": [
+        {
+            "id": 1,
+            "card": "pokemon-jungle/scyther-10",
+            "location": "top-left"
+        },
+        {
+            "id": 2,
+            "card": "jumpluff-1st-edition-7",
+            "location": "top-middle"
+        },
+        {
+            "id": 3,
+            "card": "pokemon-sandstorm/typhlosion-ex-99",
+            "location": "top-right"
+        },
+        {
+            "id": 4,
+            "card": "pokemon-base-set-2/mewtwo-10",
+            "location": "middle-left"
+        },
+        {
+            "id": 5,
+            "card": "pokemon-team-rocket/dark-charizard-21",
+            "location": "center"
+        },
+        {
+            "id": 6,
+            "card": "pokemon-legendary-collection/alakazam-1",
+            "location": "middle-right"
+        },
+        {
+            "id": 7,
+            "card": "pokemon-base-set-2/wigglytuff-19",
+            "location": "bottom-left"
+        },
+        {
+            "id": 8,
+            "card": "pokemon-gym-heroes/rocket%27s-moltres-12",
+            "location": "bottom-middle"
+        },
+        {
+            "id": 9,
+            "card": "pokemon-neo-genesis/kingdra-1st-edition-8",
+            "location": "bottom-right"
+        }
+    ]
+}
