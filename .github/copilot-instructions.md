@@ -65,4 +65,4 @@ After making any code change, always:
    ```
    If the score is below 10.00, fix all issues before considering the change complete.
 
-6. If the repo architechture or data layout has changed, update this file and the docs in `docs/ARCHITECTURE.md` accordingly.
+6. If the repo architechture or data layout has changed, update this file or relevant files in `docs/` accordingly.

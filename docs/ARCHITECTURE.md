@@ -9,9 +9,10 @@ against a pre-built SQLite reference database.
 
 ```
 Image → detect_cards() → [DetectedCard, …]
-  └→ for each detection × 4 rotations:
-       compute_hashes() → CardHashes
-       CardMatcher.find_matches() → [MatchResult, …]
+  └→ for each detection:
+       compute_hashes(0°) → CardHashes → find_matches()
+       if distance < confident_threshold: done
+       else: compute_hashes(180°) → find_matches() → keep best
 ```
 
 ## Module Map
@@ -21,7 +22,7 @@ Image → detect_cards() → [DetectedCard, …]
 | `card_reco/__init__.py` | Public API: `identify_cards()`, `identify_cards_from_array()` |
 | `card_reco/detector.py` | OpenCV contour-based card detection and perspective normalisation |
 | `card_reco/hasher.py` | Perceptual hashing via `imagehash` (ahash, phash, dhash, whash) |
-| `card_reco/matcher.py` | Brute-force linear scan matching with weighted Hamming distance |
+| `card_reco/matcher.py` | Vectorised NumPy matching with weighted Hamming distance |
 | `card_reco/database.py` | SQLite wrapper for the reference hash database |
 | `card_reco/models.py` | Dataclasses: `DetectedCard`, `CardHashes`, `CardRecord`, `MatchResult` |
 | `card_reco/cli.py` | CLI entry point (`card-reco identify <image>`) |
@@ -71,9 +72,11 @@ combined = (0.8·ahash + 1.0·phash + 1.0·dhash + 0.8·whash) / 3.6
 
 Results below the threshold (default 40.0) are sorted by distance.
 
-The top-level API tries **all 4 cardinal rotations** (0°, 90°, 180°, 270°)
-for each detected card and keeps the rotation with the lowest best-match
-distance.
+The top-level API tries **at most 2 orientations** (0° and 180°) for each
+detected card.  If the 0° orientation yields a confident match (distance
+below `confident_threshold`, default 25.0), the 180° flip is skipped.
+Empirical analysis showed 90°/270° rotations never produce useful matches
+(all "wins" had distances > 84 with wrong cards).
 
 ## Reference Database (`database.py`)
 
@@ -143,7 +146,8 @@ Measured on a single axis-aligned card image with ~3 500 reference cards:
 | Hashing (1 card) | ~260 ms | PIL + imagehash library overhead |
 | DB load + matrix build | ~40 ms | SQLite → Python objects → NumPy bit-matrix (one-time) |
 | Matching (1 query) | ~4 ms | Vectorised NumPy Hamming distance |
-| **Full pipeline** | **~0.4 s** | 3 detected × 4 rotations × (hash + match) |
+| **Full pipeline (single card)** | **~0.2 s** | 1 detection × 1–2 orientations |
+| **Full pipeline (3×3 grid)** | **~0.8 s** | 13 detections × 1–2 orientations |
 
 ### Matching Implementation
 
@@ -163,32 +167,27 @@ a **~29× end-to-end speedup** (12 s → 0.4 s) and ~**240× matching speedup**
 
 ### Remaining Bottleneck
 
-The dominant cost is now **hashing** (~260 ms per card × 12 hash operations
-= ~3.1 s). The `imagehash` library converts each image to PIL, resizes, and
-computes DCT/wavelet transforms in pure Python/NumPy.
+The dominant cost is now **hashing** (~260 ms per card × 1–2 orientations).
+The `imagehash` library converts each image to PIL, resizes, and computes
+DCT/wavelet transforms in pure Python/NumPy.
 
 ### Further Improvement Opportunities
 
-1. **Eliminate rotation brute-force** — The perspective transform already
-   knows the card orientation from the corner ordering. By inferring
-   orientation during detection (e.g. top-heavy content → top-up), the 4×
-   rotation cost is eliminated.
-
-2. **Pre-filter by set or colour** — Use card border colour or set symbols
+1. **Pre-filter by set or colour** — Use card border colour or set symbols
    to narrow the search space before hashing.
 
-3. **BK-trees or VP-trees** — Index hashes in a metric tree for sub-linear
+2. **BK-trees or VP-trees** — Index hashes in a metric tree for sub-linear
    nearest-neighbour search on Hamming distance.
 
-4. **Multi-index hashing** — Split each 256-bit hash into 4 × 64-bit
+3. **Multi-index hashing** — Split each 256-bit hash into 4 × 64-bit
    chunks and use hash-table lookups for candidate generation, then verify
    with full distance.
 
-5. **Smaller hash size** — `hash_size=8` (64 bits) is faster to compute
+4. **Smaller hash size** — `hash_size=8` (64 bits) is faster to compute
    and compare, and more tolerant of photo-vs-scan differences. The trade-off
    is lower discrimination between visually similar cards.
 
-6. **CNN embeddings** — Modern systems often use a small neural network
+5. **CNN embeddings** — Modern systems often use a small neural network
    (MobileNet, EfficientNet) to produce a compact embedding vector, then
    match via cosine similarity with FAISS or Annoy. This handles
    perspective, lighting, and rotation far better than perceptual hashes.
@@ -199,7 +198,7 @@ For a 3 500-card database with 3 detections per image:
 
 | Improvement | Expected speedup | Effort |
 |---|---|---|
-| Eliminate rotation brute-force | ~4× on hash+match | Medium |
+| ~~Eliminate rotation brute-force~~ | ~~Done (2× on hashing)~~ | ~~Done~~ |
 | Reduce hash_size from 16 to 8 | ~2× on hashing | Low (needs DB rebuild) |
 | BK-tree indexing | ~2–5× on matching | Medium |
 | CNN embeddings + FAISS | ~50–100× + better accuracy | High |

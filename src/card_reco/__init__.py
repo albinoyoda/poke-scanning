@@ -50,42 +50,46 @@ def identify_cards_from_array(
     db_path: str | Path | None = None,
     top_n: int = 5,
     threshold: float = 40.0,
+    confident_threshold: float = 25.0,
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards from a BGR numpy array.
 
     Same as identify_cards but accepts a pre-loaded image array.
-    Tries all 4 rotations per detected card to handle orientation ambiguity.
+    Tries at most two orientations (0° and 180°) per detected card.
+    If the first orientation produces a confident match (distance below
+    *confident_threshold*), the 180° flip is skipped entirely.
     """
     detected = detect_cards(image)
 
     if not detected:
         return []
 
-    rotations = [
-        None,
-        cv2.ROTATE_90_CLOCKWISE,
-        cv2.ROTATE_180,
-        cv2.ROTATE_90_COUNTERCLOCKWISE,
-    ]
-
     all_results: list[list[MatchResult]] = []
 
     with CardMatcher(db_path) as matcher:
         for card in detected:
-            best_matches: list[MatchResult] = []
-            for rotation in rotations:
-                if rotation is None:
-                    rotated = card.image
-                else:
-                    rotated = np.asarray(
-                        cv2.rotate(card.image, rotation), dtype=np.uint8
-                    )
-                hashes = compute_hashes(rotated)
-                matches = matcher.find_matches(hashes, top_n=top_n, threshold=threshold)
-                if matches and (
-                    not best_matches or matches[0].distance < best_matches[0].distance
-                ):
-                    best_matches = matches
+            # Try the card as-is first (0° orientation).
+            hashes = compute_hashes(card.image)
+            best_matches = matcher.find_matches(
+                hashes, top_n=top_n, threshold=threshold
+            )
+
+            # Skip 180° flip when the first orientation is already confident.
+            if best_matches and best_matches[0].distance < confident_threshold:
+                all_results.append(best_matches)
+                continue
+
+            # Try 180° rotation and keep whichever orientation matched better.
+            rotated = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
+            hashes_180 = compute_hashes(rotated)
+            matches_180 = matcher.find_matches(
+                hashes_180, top_n=top_n, threshold=threshold
+            )
+            if matches_180 and (
+                not best_matches or matches_180[0].distance < best_matches[0].distance
+            ):
+                best_matches = matches_180
+
             all_results.append(best_matches)
 
     return all_results
