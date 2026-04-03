@@ -106,7 +106,7 @@ by the edge fraction multiplier. No regressions across the test suite.
 
 ---
 
-### Step 4 — CLAHE preprocessing for adaptive threshold
+### Step 4 — CLAHE preprocessing for adaptive threshold [DONE]
 
 **Rationale:** CLAHE (Contrast Limited Adaptive Histogram Equalization)
 enhances local contrast. Applying it before adaptive thresholding could
@@ -115,11 +115,17 @@ benefits hash matching when applied to warped cards before hashing (see
 [known_issues.md](known_issues.md) item #2).
 
 **Change:** Apply `cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))` to
-the grayscale image before adaptive thresholding.
+the blurred grayscale image before adaptive thresholding in
+`_find_card_contours`. Added debug output for the CLAHE-enhanced image.
 
 **Risk:** Low — preprocessing only. May slightly change edge character for
 all images.
 
-**Files:** `src/card_reco/detector.py`, potentially `src/card_reco/hasher.py`
+**Files:** `src/card_reco/detector.py`
 
-**Status:** Not started
+**Outcome:** 78 passed, 4 xfailed — no regressions. The CLAHE-enhanced
+grayscale shows better card-vs-ground contrast for Moltres. The adaptive
+threshold becomes noisier overall but the quality scoring and edge
+verification from steps 2-3 filter out bad candidates. The Moltres warped
+crop is slightly improved but the hash distance still exceeds the match
+threshold (a hasher-side normalisation issue, not detection).
