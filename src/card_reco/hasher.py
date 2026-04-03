@@ -31,3 +31,13 @@ def hamming_distance(hash1: str, hash2: str) -> int:
     h1 = imagehash.hex_to_hash(hash1)
     h2 = imagehash.hex_to_hash(hash2)
     return int(h1 - h2)
+
+
+def hex_to_bits(hex_str: str) -> NDArray[np.uint8]:
+    """Convert a hex-encoded hash string to a flat numpy bit array.
+
+    Each hex character becomes 4 bits, so a 64-char hex string produces
+    a 256-element uint8 array of 0s and 1s.
+    """
+    raw = bytes.fromhex(hex_str)
+    return np.unpackbits(np.frombuffer(raw, dtype=np.uint8))

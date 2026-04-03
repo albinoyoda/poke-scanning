@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-from card_reco.hasher import compute_hashes, compute_hashes_pil, hamming_distance
+from card_reco.hasher import (
+    compute_hashes,
+    compute_hashes_pil,
+    hamming_distance,
+    hex_to_bits,
+)
 
 
 def _make_solid_image(color: tuple[int, int, int] = (100, 150, 200)) -> np.ndarray:
@@ -75,3 +80,30 @@ class TestHammingDistance:
         h1 = "ff00" * 16
         h2 = "ff00" * 15 + "ff01"  # 1 bit difference in last segment
         assert hamming_distance(h1, h2) == 1
+
+
+class TestHexToBits:
+    def test_length_matches_hex_input(self):
+        # 64 hex chars = 32 bytes = 256 bits
+        bits = hex_to_bits("ff00" * 16)
+        assert len(bits) == 256
+
+    def test_all_ones(self):
+        bits = hex_to_bits("ff" * 32)
+        assert bits.sum() == 256
+
+    def test_all_zeros(self):
+        bits = hex_to_bits("00" * 32)
+        assert bits.sum() == 0
+
+    def test_single_byte(self):
+        # 0xa5 = 10100101
+        bits = hex_to_bits("a5")
+        assert list(bits) == [1, 0, 1, 0, 0, 1, 0, 1]
+
+    def test_consistent_with_hamming_distance(self):
+        h1 = "ff00" * 16
+        h2 = "ff00" * 15 + "ff01"
+        b1 = hex_to_bits(h1)
+        b2 = hex_to_bits(h2)
+        assert int((b1 ^ b2).sum()) == hamming_distance(h1, h2)
