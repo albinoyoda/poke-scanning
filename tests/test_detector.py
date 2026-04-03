@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from card_reco.detector import _order_corners, detect_cards
+from card_reco.detector import _order_corners, _refine_corners_from_hull, detect_cards
 
 
 def _make_card_image(
@@ -68,3 +68,50 @@ class TestOrderCorners:
         ordered = _order_corners(pts)
         assert ordered[0][0] == 0 and ordered[0][1] == 0
         assert ordered[1][0] == 100 and ordered[1][1] == 0
+
+
+class TestRefineCornersFromHull:
+    """Test convex-hull-based corner refinement for minAreaRect fallback."""
+
+    def _make_trapezoidal_contour(self) -> np.ndarray:
+        """Create a contour that forms a trapezoid (perspective-distorted card)."""
+        # Top edge narrower than bottom — simulates a card tilting away
+        pts = np.array([[120, 50], [280, 50], [320, 350], [80, 350]], dtype=np.int32)
+        return pts.reshape(-1, 1, 2)
+
+    def test_hull_corners_differ_from_box(self):
+        """Hull corners should capture the real trapezoid, not a rectangle."""
+        contour = self._make_trapezoidal_contour()
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect).astype(np.float32)
+        refined = _refine_corners_from_hull(contour, box)
+
+        # The trapezoid's top edge (50 px from top) is narrower than the box
+        # corner rectangle — hull corners must differ from the box.
+        assert not np.allclose(refined, box, atol=1.0), (
+            "Hull corners should differ from minAreaRect box for a trapezoid"
+        )
+
+    def test_four_distinct_corners(self):
+        """All four corners must be distinct points."""
+        contour = self._make_trapezoidal_contour()
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect).astype(np.float32)
+        refined = _refine_corners_from_hull(contour, box)
+
+        for i in range(4):
+            for j in range(i + 1, 4):
+                dist = float(np.linalg.norm(refined[i] - refined[j]))
+                assert dist > 10.0, f"Corners {i} and {j} are too close: {dist:.1f} px"
+
+    def test_falls_back_to_box_for_thin_hull(self):
+        """When the hull can't provide 4 good corners, fall back to box."""
+        # Near-degenerate contour — very thin sliver
+        pts = np.array([[100, 100], [200, 100], [201, 105], [100, 105]], dtype=np.int32)
+        contour = pts.reshape(-1, 1, 2)
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect).astype(np.float32)
+        refined = _refine_corners_from_hull(contour, box)
+
+        # Should fall back to box (edge < 10 check)
+        np.testing.assert_array_almost_equal(refined, box)

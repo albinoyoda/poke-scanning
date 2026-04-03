@@ -6,7 +6,7 @@ Each subfolder has an _annotations.json with expected card IDs.
 Required data:
     python scripts/download_reference_data.py --small \
         --sets sv3pt5 base1 base2 base4 base5 base6 gym1 neo1 ex2 \
-               basep ex1 ex6 neo4 cel25 swshp
+               basep ex1 ex6 neo4 cel25 swshp sv10
     python scripts/build_hash_db.py --rebuild
 """
 
@@ -26,6 +26,7 @@ TEST_DATA_DIR = Path("data") / "tests"
 DB_PATH = Path("data") / "card_hashes.db"
 
 SINGLE_AXIS_ALIGNED_DIR = TEST_DATA_DIR / "single_cards" / "axis_aligned"
+SINGLE_ROTATED_DIR = TEST_DATA_DIR / "single_cards" / "rotated"
 SINGLE_TILTED_DIR = TEST_DATA_DIR / "single_cards" / "tilted"
 GRADED_DIR = TEST_DATA_DIR / "graded_cards"
 MULTIPLE_DIR = TEST_DATA_DIR / "multiple_cards"
@@ -188,10 +189,10 @@ class TestAxisAlignedSingleCards:
       - pikachu-v-swsh061:        ~6   (excellent)
       - birthday-pikachu-24:      ~50  (good)
       - shining_kabutops_108_105: ~57  (good)
+      - pidgeot_12_112:           ~54  (good — improved by area-diverse NMS)
+      - shining_raichu:           ~58  (good — improved by area-diverse NMS)
       - treecko_75_109:           ~61  (marginal — best detection is card #1)
-      - shining_raichu:           ~73  (poor — photo-vs-scan gap)
       - xerneas_12_25:            ~84  (poor — photo-vs-scan gap)
-      - pidgeot_12_112:           ~107 (fail — detector picks wrong region)
     """
 
     @pytest.fixture()
@@ -227,8 +228,10 @@ class TestAxisAlignedSingleCards:
         "image_name",
         [
             "birthday-pikachu-24.png",
+            "pidgeot_12_112.png",
             "pikachu-v-swsh061.png",
             "shining_kabutops_108_105.png",
+            "shining_raichu.png",
         ],
     )
     def test_card_identified(self, image_name: str) -> None:
@@ -253,16 +256,8 @@ class TestAxisAlignedSingleCards:
                 "Combined distance ~61 just above default threshold",
             ),
             pytest.param(
-                "shining_raichu.png",
-                "Combined distance ~73, photo-vs-scan gap too large",
-            ),
-            pytest.param(
                 "xerneas_12_25.png",
                 "Combined distance ~84, photo-vs-scan gap too large",
-            ),
-            pytest.param(
-                "pidgeot_12_112.png",
-                "Combined distance ~107, detector favours wrong region",
             ),
         ],
     )
@@ -299,7 +294,7 @@ class TestAxisAlignedSingleCards:
         assert not failures, "Detection failures:\n" + "\n".join(failures)
 
     def test_axis_aligned_identification_rate(self, annotations: list[dict]) -> None:
-        """At least 3 of 7 axis-aligned cards are identified (current baseline)."""
+        """At least 5 of 7 axis-aligned cards are identified (current baseline)."""
         matched = 0
         for entry in annotations:
             image_path = SINGLE_AXIS_ALIGNED_DIR / entry["image"]
@@ -311,6 +306,198 @@ class TestAxisAlignedSingleCards:
                 matched += 1
 
         total = len(annotations)
-        assert matched >= 3, (
-            f"Identified {matched}/{total} axis-aligned cards, expected >= 3"
+        assert matched >= 5, (
+            f"Identified {matched}/{total} axis-aligned cards, expected >= 5"
         )
+
+
+@skip_no_data
+class TestRotatedSingleCards:
+    """Test detection and identification of rotated single-card images.
+
+    These cards are photographed at non-trivial in-plane rotation angles.
+    The detector must find the card contour despite rotation and produce
+    a correctly warped portrait image.
+
+    Current status:
+      - sandslash_skyridge_non_holo_93_144: ~25  (excellent)
+      - electivire_ex_69_182:              FAILS — holographic, textured bg
+    """
+
+    @pytest.fixture()
+    def annotations(self) -> list[dict]:
+        """Load annotations for rotated test cards."""
+        data = load_folder_annotations(SINGLE_ROTATED_DIR)
+        return data["annotations"]
+
+    @pytest.mark.parametrize(
+        "image_name",
+        [
+            "electivire_ex_69_182.png",
+            "sandslash_skyridge_non_holo_93_144.png",
+        ],
+    )
+    def test_card_detected(self, image_name: str) -> None:
+        """Verify that at least one region is detected in a rotated card image."""
+        image_path = SINGLE_ROTATED_DIR / image_name
+        image = cv2.imread(str(image_path))
+        assert image is not None, f"Could not load {image_path}"
+
+        cards = detect_cards(np.asarray(image, dtype=np.uint8))
+        assert len(cards) >= 1, (
+            f"Expected at least 1 card in {image_name}, got {len(cards)}"
+        )
+
+    def test_sandslash_identified(self) -> None:
+        """Sandslash rotated card matches within threshold 60."""
+        image_name = "sandslash_skyridge_non_holo_93_144.png"
+        expected_id = get_card_id(SINGLE_ROTATED_DIR, image_name)
+        assert expected_id is not None
+
+        image_path = SINGLE_ROTATED_DIR / image_name
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        assert len(results) >= 1, f"No cards detected in {image_name}"
+
+        found_ids = _collect_match_ids(results)
+        assert expected_id in found_ids, (
+            f"{image_name}: expected {expected_id} in top-5 matches, got {found_ids}"
+        )
+
+    @pytest.mark.xfail(reason="Holographic card on textured background — dist > 77")
+    def test_electivire_identified_xfail(self) -> None:
+        """Electivire rotated card — currently fails identification."""
+        image_name = "electivire_ex_69_182.png"
+        expected_id = get_card_id(SINGLE_ROTATED_DIR, image_name)
+        assert expected_id is not None
+
+        image_path = SINGLE_ROTATED_DIR / image_name
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        assert len(results) >= 1, f"No cards detected in {image_name}"
+
+        found_ids = _collect_match_ids(results)
+        assert expected_id in found_ids, (
+            f"{image_name}: expected {expected_id} in top-5, got {found_ids}"
+        )
+
+
+@skip_no_data
+class TestTiltedSingleCards:
+    """Test detection and identification of tilted (perspective distorted) cards.
+
+    These cards are photographed at an angle, producing trapezoidal
+    projections. The detector must find the card contour and apply a
+    perspective transform to normalise the card.
+
+    Current identification status (combined hash distance):
+      - kingdra_neo:           ~15  (excellent)
+      - alakazam_lc:           ~20  (excellent)
+      - bayleef_neo_1st_ed:    ~36  (good)
+      - exeggcute_102_165:     ~55  (good — improved by area-diverse NMS)
+      - moltres_151:           ~91  (fail — low-contrast border, wrong region)
+    """
+
+    @pytest.fixture()
+    def annotations(self) -> list[dict]:
+        """Load annotations for tilted test cards."""
+        data = load_folder_annotations(SINGLE_TILTED_DIR)
+        return data["annotations"]
+
+    @pytest.mark.parametrize(
+        "image_name",
+        [
+            "alakazam_lc.png",
+            "bayleef_neo_1st_ed.png",
+            "exeggcute_102_165.png",
+            "kingdra_neo.png",
+            "moltres_151.png",
+        ],
+    )
+    def test_card_detected(self, image_name: str) -> None:
+        """Verify that a tilted card is detected."""
+        image_path = SINGLE_TILTED_DIR / image_name
+        image = cv2.imread(str(image_path))
+        assert image is not None, f"Could not load {image_path}"
+
+        cards = detect_cards(np.asarray(image, dtype=np.uint8))
+        assert len(cards) >= 1, (
+            f"Expected at least 1 card in {image_name}, got {len(cards)}"
+        )
+
+    @pytest.mark.parametrize(
+        "image_name",
+        [
+            "alakazam_lc.png",
+            "bayleef_neo_1st_ed.png",
+            "exeggcute_102_165.png",
+            "kingdra_neo.png",
+        ],
+    )
+    def test_card_identified(self, image_name: str) -> None:
+        """Tilted cards that reliably match within threshold 60."""
+        expected_id = get_card_id(SINGLE_TILTED_DIR, image_name)
+        assert expected_id is not None
+
+        image_path = SINGLE_TILTED_DIR / image_name
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        assert len(results) >= 1, f"No cards detected in {image_name}"
+
+        found_ids = _collect_match_ids(results)
+        assert expected_id in found_ids, (
+            f"{image_name}: expected {expected_id} in top-5 matches, got {found_ids}"
+        )
+
+    @pytest.mark.parametrize(
+        ("image_name", "reason"),
+        [
+            pytest.param(
+                "moltres_151.png",
+                "Combined distance ~91, low-contrast border, wrong region",
+            ),
+        ],
+    )
+    @pytest.mark.xfail(
+        reason="Hash distance exceeds threshold for photo-vs-scan comparison"
+    )
+    def test_card_identified_xfail(self, image_name: str, reason: str) -> None:
+        """Tilted cards that currently fail identification."""
+        expected_id = get_card_id(SINGLE_TILTED_DIR, image_name)
+        assert expected_id is not None, reason
+
+        image_path = SINGLE_TILTED_DIR / image_name
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        assert len(results) >= 1, f"No cards detected in {image_name}"
+
+        found_ids = _collect_match_ids(results)
+        assert expected_id in found_ids, (
+            f"{image_name}: expected {expected_id} in top-5, got {found_ids}. "
+            f"Reason: {reason}"
+        )
+
+    def test_all_tilted_detected(self, annotations: list[dict]) -> None:
+        """Verify all tilted images produce at least one detection."""
+        failures: list[str] = []
+        for entry in annotations:
+            image_path = SINGLE_TILTED_DIR / entry["image"]
+            image = cv2.imread(str(image_path))
+            if image is None:
+                failures.append(f"{entry['image']}: could not load")
+                continue
+            cards = detect_cards(np.asarray(image, dtype=np.uint8))
+            if len(cards) < 1:
+                failures.append(f"{entry['image']}: no cards detected")
+        assert not failures, "Detection failures:\n" + "\n".join(failures)
+
+    def test_tilted_identification_rate(self, annotations: list[dict]) -> None:
+        """At least 3 of 5 tilted cards are identified (current baseline)."""
+        matched = 0
+        for entry in annotations:
+            image_path = SINGLE_TILTED_DIR / entry["image"]
+            results = identify_cards(
+                image_path, db_path=DB_PATH, top_n=5, threshold=60.0
+            )
+            found_ids = _collect_match_ids(results)
+            if entry["card_id"] in found_ids:
+                matched += 1
+
+        total = len(annotations)
+        assert matched >= 4, f"Identified {matched}/{total} tilted cards, expected >= 4"

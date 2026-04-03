@@ -16,6 +16,7 @@ MAX_CARD_AREA_RATIO = 0.95  # Skip contours that are basically the whole image
 CARD_ASPECT_RATIO = 5.0 / 7.0  # width / height ≈ 0.714
 ASPECT_RATIO_TOLERANCE = 0.25  # Allow 0.46 – 0.96
 MIN_RECT_COMPACTNESS = 0.65  # Contour must fill at least 65% of its minAreaRect
+_AREA_DIVERSITY_THRESH = 0.85  # NMS keeps both detections when area ratio < this
 
 
 def detect_cards(image: NDArray[np.uint8]) -> list[DetectedCard]:
@@ -175,9 +176,51 @@ def _extract_corners(
         contour_area = cv2.contourArea(contour)
         compactness = contour_area / rect_area
         if compactness >= MIN_RECT_COMPACTNESS:
-            return _order_corners(box.astype(np.float32))
+            corners = _refine_corners_from_hull(contour, box.astype(np.float32))
+            return _order_corners(corners)
 
     return None
+
+
+def _refine_corners_from_hull(
+    contour: NDArray[np.uint8],
+    box: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    """Find actual card corners from convex hull nearest to minAreaRect corners.
+
+    minAreaRect returns a perfect rotated rectangle, discarding perspective
+    distortion.  This function finds the convex-hull points closest to each
+    box corner, preserving the real trapezoidal shape of tilted cards.
+
+    Falls back to the original box corners when the hull-based result would
+    be degenerate (e.g. two hull points collapsing to the same location).
+    """
+    hull = cv2.convexHull(contour).reshape(-1, 2).astype(np.float32)
+    if len(hull) < 4:
+        return box.astype(np.float32)
+
+    corners = np.zeros((4, 2), dtype=np.float32)
+    used_indices: set[int] = set()
+    for i, box_corner in enumerate(box):
+        distances = np.linalg.norm(hull - box_corner, axis=1)
+        order = np.argsort(distances)
+        for idx in order:
+            if int(idx) not in used_indices:
+                corners[i] = hull[idx]
+                used_indices.add(int(idx))
+                break
+
+    # Validate: all 4 corners should be sufficiently separated.
+    # If any pair is too close, the hull didn't capture all four card
+    # corners properly — fall back to the original box.
+    min_edge = float("inf")
+    for i in range(4):
+        edge_len = float(np.linalg.norm(corners[i] - corners[(i + 1) % 4]))
+        min_edge = min(min_edge, edge_len)
+    if min_edge < 10.0:
+        return box.astype(np.float32)
+
+    return corners
 
 
 def _has_card_aspect_ratio(corners: NDArray[np.float32]) -> bool:
@@ -206,7 +249,13 @@ def _non_max_suppression(
     detections: list[DetectedCard],
     overlap_thresh: float = 0.5,
 ) -> list[DetectedCard]:
-    """Remove overlapping detections, keeping the one with higher confidence."""
+    """Remove overlapping detections, keeping the one with higher confidence.
+
+    When two detections overlap but differ significantly in area (ratio below
+    *_AREA_DIVERSITY_THRESH*), both are kept so that the matcher can evaluate
+    both the broad and tight crops.  This helps rotated and perspective-
+    distorted cards where a tighter crop often yields a better hash match.
+    """
     if len(detections) <= 1:
         return detections
 
@@ -215,12 +264,23 @@ def _non_max_suppression(
     keep: list[DetectedCard] = []
 
     for det in detections:
-        overlaps = False
+        suppressed = False
+        det_area = float(cv2.contourArea(det.corners.reshape(4, 1, 2).astype(np.int32)))
         for kept in keep:
             if _compute_overlap(det.corners, kept.corners) > overlap_thresh:
-                overlaps = True
+                # Allow both when areas differ enough — smaller crops
+                # may be tighter and produce better hash matches.
+                kept_area = float(
+                    cv2.contourArea(kept.corners.reshape(4, 1, 2).astype(np.int32))
+                )
+                max_area = max(det_area, kept_area)
+                if max_area > 0:
+                    area_ratio = min(det_area, kept_area) / max_area
+                    if area_ratio < _AREA_DIVERSITY_THRESH:
+                        continue  # Don't suppress — different-sized crop
+                suppressed = True
                 break
-        if not overlaps:
+        if not suppressed:
             keep.append(det)
 
     return keep
