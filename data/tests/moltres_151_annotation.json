@@ -1,9 +1,0 @@
-{
-    "image": "moltres_151.png",
-    "expected_cards": [
-        {
-            "card_id": "sv3pt5-146",
-            "name": "Moltres"
-        }
-    ]
-}

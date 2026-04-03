@@ -1,0 +1,54 @@
+{
+    "images": [
+        {
+            "image": "3x3_top_loaders.png",
+            "cards": [
+                {
+                    "card_id": "base2-10",
+                    "name": "Scyther",
+                    "location": "top-left"
+                },
+                {
+                    "card_id": "neo1-7",
+                    "name": "Jumpluff",
+                    "location": "top-middle"
+                },
+                {
+                    "card_id": "ex2-99",
+                    "name": "Typhlosion ex",
+                    "location": "top-right"
+                },
+                {
+                    "card_id": "base4-10",
+                    "name": "Mewtwo",
+                    "location": "middle-left"
+                },
+                {
+                    "card_id": "base5-21",
+                    "name": "Dark Charizard",
+                    "location": "center"
+                },
+                {
+                    "card_id": "base6-1",
+                    "name": "Alakazam",
+                    "location": "middle-right"
+                },
+                {
+                    "card_id": "base4-19",
+                    "name": "Wigglytuff",
+                    "location": "bottom-left"
+                },
+                {
+                    "card_id": "gym1-12",
+                    "name": "Rocket's Moltres",
+                    "location": "bottom-middle"
+                },
+                {
+                    "card_id": "neo1-8",
+                    "name": "Kingdra",
+                    "location": "bottom-right"
+                }
+            ]
+        }
+    ]
+}

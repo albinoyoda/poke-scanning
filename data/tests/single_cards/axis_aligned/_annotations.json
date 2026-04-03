@@ -1,0 +1,32 @@
+{
+    "annotations": [
+        {
+            "image": "birthday-pikachu-24.png",
+            "card_id": "basep-24"
+        },
+        {
+            "image": "pidgeot_12_112.png",
+            "card_id": "ex6-10"
+        },
+        {
+            "image": "pikachu-v-swsh061.png",
+            "card_id": "swshp-SWSH061"
+        },
+        {
+            "image": "shining_kabutops_108_105.png",
+            "card_id": "neo4-108"
+        },
+        {
+            "image": "shining_raichu.png",
+            "card_id": "neo4-111"
+        },
+        {
+            "image": "treecko_75_109.png",
+            "card_id": "ex1-75"
+        },
+        {
+            "image": "xerneas_12_25.png",
+            "card_id": "cel25-12"
+        }
+    ]
+}

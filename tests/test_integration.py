@@ -1,10 +1,11 @@
 """Integration tests using real card photos from data/tests/.
 
 These tests verify the full pipeline: detection → hashing → matching.
-Each test image has an associated _annotation.json with expected card IDs.
+Each subfolder has an _annotations.json with expected card IDs.
 
 Required data:
-    python scripts/download_reference_data.py --small --sets sv3pt5 base1 base2 base4 base5 base6 gym1 neo1 ex2
+    python scripts/download_reference_data.py --small \
+        --sets sv3pt5 base1 base2 base4 base5 base6 gym1 neo1 ex2
     python scripts/build_hash_db.py --rebuild
 """
 
@@ -14,6 +15,7 @@ import json
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 
 from card_reco import identify_cards
@@ -22,17 +24,30 @@ from card_reco.detector import detect_cards
 TEST_DATA_DIR = Path("data") / "tests"
 DB_PATH = Path("data") / "card_hashes.db"
 
+SINGLE_TILTED_DIR = TEST_DATA_DIR / "single_cards" / "tilted"
+GRADED_DIR = TEST_DATA_DIR / "graded_cards"
+MULTIPLE_DIR = TEST_DATA_DIR / "multiple_cards"
+
 has_test_data = TEST_DATA_DIR.exists() and DB_PATH.exists()
 skip_no_data = pytest.mark.skipif(
     not has_test_data, reason="Test data or hash DB not available"
 )
 
 
-def load_annotation(image_stem: str) -> dict:
-    """Load annotation JSON for a test image."""
-    annotation_path = TEST_DATA_DIR / f"{image_stem}_annotation.json"
+def load_folder_annotations(folder: Path) -> dict:
+    """Load _annotations.json from a test subfolder."""
+    annotation_path = folder / "_annotations.json"
     with open(annotation_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def get_card_id(folder: Path, image_name: str) -> str | None:
+    """Look up the card_id for an image from the folder annotations."""
+    data = load_folder_annotations(folder)
+    for entry in data.get("annotations", data.get("expected_cards", [])):
+        if entry["image"] == image_name:
+            return entry["card_id"]
+    return None
 
 
 @skip_no_data
@@ -41,11 +56,11 @@ class TestSingleCardDetection:
 
     def test_moltres_151_detected(self) -> None:
         """Verify that a single loose card is detected."""
-        image_path = TEST_DATA_DIR / "moltres_151.png"
+        image_path = SINGLE_TILTED_DIR / "moltres_151.png"
         image = cv2.imread(str(image_path))
         assert image is not None, f"Could not load {image_path}"
 
-        cards = detect_cards(image)
+        cards = detect_cards(np.asarray(image, dtype=np.uint8))
         assert len(cards) >= 1, f"Expected at least 1 card, got {len(cards)}"
 
     @pytest.mark.xfail(reason="Low-contrast card border produces hash distances > 90")
@@ -56,9 +71,10 @@ class TestSingleCardDetection:
         against small digital scans produces distances above any reasonable
         threshold for this particular image (low contrast card border).
         """
-        annotation = load_annotation("moltres_151")
-        image_path = TEST_DATA_DIR / annotation["image"]
-        expected_ids = {c["card_id"] for c in annotation["expected_cards"]}
+        expected_id = get_card_id(SINGLE_TILTED_DIR, "moltres_151.png")
+        assert expected_id is not None
+        image_path = SINGLE_TILTED_DIR / "moltres_151.png"
+        expected_ids = {expected_id}
 
         results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
         assert len(results) >= 1, "No cards detected"
@@ -80,20 +96,20 @@ class TestGradedCardDetection:
 
     def test_psa_charizard_detected(self) -> None:
         """Verify that the card inside a PSA slab is detected."""
-        image_path = TEST_DATA_DIR / "image_psa_graded_charizard.png"
+        image_path = GRADED_DIR / "charizard_sl_graded.png"
         image = cv2.imread(str(image_path))
         assert image is not None
 
-        cards = detect_cards(image)
+        cards = detect_cards(np.asarray(image, dtype=np.uint8))
         assert len(cards) >= 1, (
             f"Expected at least 1 card detected from PSA slab, got {len(cards)}"
         )
 
     def test_psa_charizard_identified(self) -> None:
         """Verify a PSA graded Charizard is correctly identified."""
-        annotation = load_annotation("image_psa_graded_charizard")
-        image_path = TEST_DATA_DIR / annotation["image"]
-        expected_ids = {c["card_id"] for c in annotation["expected_cards"]}
+        annotations = load_folder_annotations(GRADED_DIR)
+        expected_ids = {c["card_id"] for c in annotations["expected_cards"]}
+        image_path = GRADED_DIR / "charizard_sl_graded.png"
 
         results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=70.0)
         assert len(results) >= 1, "No cards detected from PSA slab image"
@@ -114,20 +130,21 @@ class TestGridDetection:
 
     def test_3x3_detection_count(self) -> None:
         """Verify that at least 9 cards are detected from the grid image."""
-        image_path = TEST_DATA_DIR / "image_3x3.png"
+        image_path = MULTIPLE_DIR / "3x3_top_loaders.png"
         image = cv2.imread(str(image_path))
         assert image is not None
 
-        cards = detect_cards(image)
+        cards = detect_cards(np.asarray(image, dtype=np.uint8))
         assert len(cards) >= 9, (
             f"Expected at least 9 cards from 3x3 grid, got {len(cards)}"
         )
 
     def test_3x3_identification(self) -> None:
         """Verify cards from the grid are correctly identified."""
-        annotation = load_annotation("image_3x3")
-        image_path = TEST_DATA_DIR / annotation["image"]
-        expected_ids = {c["card_id"] for c in annotation["expected_cards"]}
+        annotations = load_folder_annotations(MULTIPLE_DIR)
+        image_entry = annotations["images"][0]
+        image_path = MULTIPLE_DIR / image_entry["image"]
+        expected_ids = {c["card_id"] for c in image_entry["cards"]}
 
         results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
         assert len(results) >= 9, (

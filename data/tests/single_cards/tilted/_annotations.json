@@ -1,0 +1,24 @@
+{
+    "annotations": [
+        {
+            "image": "alakazam_lc.png",
+            "card_id": "base6-1"
+        },
+        {
+            "image": "bayleef_neo_1st_ed.png",
+            "card_id": "neo1-29"
+        },
+        {
+            "image": "exeggcute_102_165.png",
+            "card_id": "sv3pt5-102"
+        },
+        {
+            "image": "kingdra_neo.png",
+            "card_id": "neo1-8"
+        },
+        {
+            "image": "moltres_151.png",
+            "card_id": "sv3pt5-146"
+        }
+    ]
+}

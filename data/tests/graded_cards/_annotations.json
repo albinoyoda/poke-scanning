@@ -1,0 +1,9 @@
+{
+    "expected_cards": [
+        {
+            "image": "charizard_sl_graded.png",
+            "card_id": "base1-4",
+            "grade": "PSA 7"
+        }
+    ]
+}
