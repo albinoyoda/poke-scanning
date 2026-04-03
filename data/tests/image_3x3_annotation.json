@@ -1,48 +1,49 @@
 {
-    "annotations": [
+    "image": "image_3x3.png",
+    "expected_cards": [
         {
-            "id": 1,
-            "card": "pokemon-jungle/scyther-10",
+            "card_id": "base2-10",
+            "name": "Scyther",
             "location": "top-left"
         },
         {
-            "id": 2,
-            "card": "jumpluff-1st-edition-7",
+            "card_id": "neo1-7",
+            "name": "Jumpluff",
             "location": "top-middle"
         },
         {
-            "id": 3,
-            "card": "pokemon-sandstorm/typhlosion-ex-99",
+            "card_id": "ex2-99",
+            "name": "Typhlosion ex",
             "location": "top-right"
         },
         {
-            "id": 4,
-            "card": "pokemon-base-set-2/mewtwo-10",
+            "card_id": "base4-10",
+            "name": "Mewtwo",
             "location": "middle-left"
         },
         {
-            "id": 5,
-            "card": "pokemon-team-rocket/dark-charizard-21",
+            "card_id": "base5-21",
+            "name": "Dark Charizard",
             "location": "center"
         },
         {
-            "id": 6,
-            "card": "pokemon-legendary-collection/alakazam-1",
+            "card_id": "base6-1",
+            "name": "Alakazam",
             "location": "middle-right"
         },
         {
-            "id": 7,
-            "card": "pokemon-base-set-2/wigglytuff-19",
+            "card_id": "base4-19",
+            "name": "Wigglytuff",
             "location": "bottom-left"
         },
         {
-            "id": 8,
-            "card": "pokemon-gym-heroes/rocket%27s-moltres-12",
+            "card_id": "gym1-12",
+            "name": "Rocket's Moltres",
             "location": "bottom-middle"
         },
         {
-            "id": 9,
-            "card": "pokemon-neo-genesis/kingdra-1st-edition-8",
+            "card_id": "neo1-8",
+            "name": "Kingdra",
             "location": "bottom-right"
         }
     ]

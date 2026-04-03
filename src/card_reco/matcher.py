@@ -61,7 +61,7 @@ class CardMatcher:
                 "whash": hamming_distance(hashes.whash, card.whash),
             }
 
-            weighted_sum = sum(distances[k] * HASH_WEIGHTS[k] for k in HASH_WEIGHTS)
+            weighted_sum = sum(distances[k] * w for k, w in HASH_WEIGHTS.items())
             total_weight = sum(HASH_WEIGHTS.values())
             combined_distance = weighted_sum / total_weight
 

@@ -54,18 +54,38 @@ def identify_cards_from_array(
     """Identify Pokemon cards from a BGR numpy array.
 
     Same as identify_cards but accepts a pre-loaded image array.
+    Tries all 4 rotations per detected card to handle orientation ambiguity.
     """
     detected = detect_cards(image)
 
     if not detected:
         return []
 
+    rotations = [
+        None,
+        cv2.ROTATE_90_CLOCKWISE,
+        cv2.ROTATE_180,
+        cv2.ROTATE_90_COUNTERCLOCKWISE,
+    ]
+
     all_results: list[list[MatchResult]] = []
 
     with CardMatcher(db_path) as matcher:
         for card in detected:
-            hashes = compute_hashes(card.image)
-            matches = matcher.find_matches(hashes, top_n=top_n, threshold=threshold)
-            all_results.append(matches)
+            best_matches: list[MatchResult] = []
+            for rotation in rotations:
+                if rotation is None:
+                    rotated = card.image
+                else:
+                    rotated = np.asarray(
+                        cv2.rotate(card.image, rotation), dtype=np.uint8
+                    )
+                hashes = compute_hashes(rotated)
+                matches = matcher.find_matches(hashes, top_n=top_n, threshold=threshold)
+                if matches and (
+                    not best_matches or matches[0].distance < best_matches[0].distance
+                ):
+                    best_matches = matches
+            all_results.append(best_matches)
 
     return all_results

@@ -12,33 +12,67 @@ dependencies = [
     "tqdm>=4.66",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4",
-    "ruff>=0.4",
-    "mypy>=1.10",
-    "types-requests>=2.31",
-    "types-tqdm>=4.66",
-    "opencv-contrib-python-stubs>=0.0.2",
-]
+[dependency-groups]
+dev = ["pytest>=7.4", "ruff>=0.4", "ty", "pylint>=3.0"]
 
 [project.scripts]
 card-reco = "card_reco.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/card_reco"]
 
+# --- Ruff (linting + formatting) ---
 [tool.ruff]
 target-version = "py310"
 src = ["src"]
 
-[tool.mypy]
-python_version = "3.10"
-strict = true
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "RUF003", # ambiguous unicode characters in comments
+]
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# --- ty (type checking) ---
+[tool.ty.environment]
+python-version = "3.10"
+
+# --- Pylint ---
+[tool.pylint.main]
+source-roots = ["src"]
+fail-under = 10.0
+
+[tool.pylint.typecheck]
+generated-members = ["cv2.*"]
+
+[tool.pylint."messages control"]
+disable = [
+    "C0114", # missing-module-docstring
+    "C0115", # missing-class-docstring
+    "C0116", # missing-function-docstring
+    "R0902", # too-many-instance-attributes
+    "R0913", # too-many-arguments
+    "R0914", # too-many-locals
+    "R0917", # too-many-positional-arguments
+]
+
+# --- Pytest ---
 [tool.pytest.ini_options]
 testpaths = ["tests"]

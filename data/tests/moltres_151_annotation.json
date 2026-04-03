@@ -1,8 +1,9 @@
 {
-    "annotations": [
+    "image": "moltres_151.png",
+    "expected_cards": [
         {
-            "id": 1,
-            "card": "pokemon-scarlet-&-violet-151/moltres-reverse-holo-146"
-        },
+            "card_id": "sv3pt5-146",
+            "name": "Moltres"
+        }
     ]
 }

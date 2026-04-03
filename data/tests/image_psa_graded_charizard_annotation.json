@@ -1,8 +1,9 @@
 {
-    "annotations": [
+    "image": "image_psa_graded_charizard.png",
+    "expected_cards": [
         {
-            "id": 1,
-            "card": "pokemon-base-set/charizard-shadowless-4",
+            "card_id": "base1-4",
+            "name": "Charizard",
             "grade": "PSA 7"
         }
     ]
