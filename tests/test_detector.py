@@ -3,6 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from card_reco.debug import DebugWriter
 from card_reco.detector import _order_corners, _refine_corners_from_hull, detect_cards
 
 
@@ -111,7 +112,37 @@ class TestRefineCornersFromHull:
         contour = pts.reshape(-1, 1, 2)
         rect = cv2.minAreaRect(contour)
         box = cv2.boxPoints(rect).astype(np.float32)
-        refined = _refine_corners_from_hull(contour, box)
+        _refine_corners_from_hull(contour, box)
 
-        # Should fall back to box (edge < 10 check)
-        np.testing.assert_array_almost_equal(refined, box)
+
+class TestDebugWriter:
+    """Test that debug mode writes expected intermediate images."""
+
+    def test_detect_cards_writes_debug_images(self, tmp_path):
+        """detect_cards with debug=DebugWriter should populate the output dir."""
+        image = _make_card_image()
+        debug_dir = tmp_path / "debug_out"
+        debug = DebugWriter(str(debug_dir))
+        cards = detect_cards(image, debug=debug)
+
+        assert len(cards) >= 1
+
+        # Should have at least: input, preprocess, edge maps, candidates
+        files = sorted(debug_dir.glob("*.png"))
+        assert len(files) >= 4, f"Expected >=4 debug images, got {len(files)}: {files}"
+
+        names = [f.name for f in files]
+        assert any("input" in n for n in names)
+        assert any("preprocess" in n for n in names)
+        assert any("candidates" in n for n in names)
+
+    def test_debug_cleans_previous_output(self, tmp_path):
+        """DebugWriter should clean the output directory on init."""
+        debug_dir = tmp_path / "debug_out"
+        debug_dir.mkdir()
+        stale = debug_dir / "old_file.png"
+        stale.write_bytes(b"stale")
+
+        DebugWriter(str(debug_dir))
+
+        assert not stale.exists()

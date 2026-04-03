@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from card_reco.models import DetectedCard
+
+if TYPE_CHECKING:
+    from card_reco.debug import DebugWriter
 
 # Standard Pokemon card aspect ratio: 2.5" x 3.5" → 5:7
 CARD_WIDTH = 734
@@ -17,17 +21,31 @@ CARD_ASPECT_RATIO = 5.0 / 7.0  # width / height ≈ 0.714
 ASPECT_RATIO_TOLERANCE = 0.25  # Allow 0.46 – 0.96
 MIN_RECT_COMPACTNESS = 0.65  # Contour must fill at least 65% of its minAreaRect
 _AREA_DIVERSITY_THRESH = 0.85  # NMS keeps both detections when area ratio < this
+_EDGE_VERIFY_RADIUS = 15  # Pixel radius for corner edge verification
+_MIN_CORNER_EDGE_FRAC = 0.5  # At least half the corners must sit near an edge
 
 
-def detect_cards(image: NDArray[np.uint8]) -> list[DetectedCard]:
+def detect_cards(
+    image: NDArray[np.uint8],
+    debug: DebugWriter | None = None,
+) -> list[DetectedCard]:
     """Detect and extract Pokemon cards from an image.
 
     Finds rectangular card-shaped regions using edge detection and contour
     analysis, then applies perspective transforms to produce normalized
     top-down views of each card.
+
+    When *debug* is provided, intermediate images are written to its
+    output directory.
     """
+    if debug:
+        debug.save_input(image)
+
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    if debug:
+        debug.save_preprocessed(gray, blurred)
 
     image_area = image.shape[0] * image.shape[1]
     min_area = image_area * MIN_CARD_AREA_RATIO
@@ -35,8 +53,21 @@ def detect_cards(image: NDArray[np.uint8]) -> list[DetectedCard]:
 
     detected: list[DetectedCard] = []
 
+    # Build primary edge map for corner verification (step 3)
+    primary_edges = cv2.Canny(blurred, 50, 150)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    primary_edges = cv2.dilate(primary_edges, kernel, iterations=1)
+
     # Try multiple edge detection strategies and merge results
-    candidates = _find_card_contours(blurred, min_area, max_area, original_bgr=image)
+    candidates = _find_card_contours(
+        blurred, min_area, max_area, original_bgr=image, debug=debug
+    )
+
+    if debug:
+        debug.save_candidates(image, candidates, min_area)
+
+    all_corners: list[NDArray[np.float32]] = []
+    corner_labels: list[str] = []
 
     for contour in candidates:
         corners = _extract_corners(contour)
@@ -51,20 +82,39 @@ def detect_cards(image: NDArray[np.uint8]) -> list[DetectedCard]:
         if area < min_area:
             continue
 
+        # Step 3: Verify corners sit near Canny edges.
+        # Detections whose corners land on blank areas (e.g. featureless
+        # ground) are penalised so they lose to tighter, edge-backed quads.
+        edge_frac = _corner_edge_fraction(corners, primary_edges)
+        if edge_frac < _MIN_CORNER_EDGE_FRAC:
+            continue
+
+        # Step 2: Quality-based confidence instead of raw area.
+        quality = _contour_quality(contour, corners, image_area)
+        confidence = quality * edge_frac
+
         warped = _four_point_transform(image, corners)
-        confidence = min(1.0, area / (image_area * 0.1))
         detected.append(
             DetectedCard(image=warped, corners=corners, confidence=confidence)
         )
+        all_corners.append(corners)
+        pct = area / image_area * 100
+        corner_labels.append(f"{len(detected) - 1} {pct:.0f}% q={confidence:.2f}")
+
+    if debug and all_corners:
+        debug.save_corners(image, all_corners, corner_labels)
 
     # Remove overlapping detections
+    before_nms = len(detected)
     detected = _non_max_suppression(detected, overlap_thresh=0.5)
 
-    # Sort by area (largest first)
-    detected.sort(
-        key=lambda d: cv2.contourArea(d.corners.reshape(4, 1, 2).astype(np.int32)),
-        reverse=True,
-    )
+    if debug:
+        debug.save_nms_result(image, before_nms, detected)
+        for i, det in enumerate(detected):
+            debug.save_warped(i, det.image)
+
+    # Sort by quality (highest confidence first)
+    detected.sort(key=lambda d: d.confidence, reverse=True)
 
     return detected
 
@@ -74,6 +124,7 @@ def _find_card_contours(
     min_area: float,
     max_area: float,
     original_bgr: NDArray[np.uint8] | None = None,
+    debug: DebugWriter | None = None,
 ) -> list[NDArray[np.uint8]]:
     """Find contours that could be cards using multiple strategies."""
     candidates: list[NDArray[np.uint8]] = []
@@ -96,10 +147,13 @@ def _find_card_contours(
             candidates.append(contour)
 
     # Strategy 1: Canny edge detection with multiple thresholds and modes
-    for low, high in [(50, 150), (30, 100)]:
+    for low, high in [(50, 150), (80, 200)]:
         edged = cv2.Canny(blurred, low, high)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         edged = cv2.dilate(edged, kernel, iterations=1)
+
+        if debug:
+            debug.save_edge_map(f"canny_{low}_{high}", edged)
 
         for retr_mode in (cv2.RETR_EXTERNAL, cv2.RETR_TREE):
             contours, _ = cv2.findContours(edged, retr_mode, cv2.CHAIN_APPROX_SIMPLE)
@@ -111,13 +165,17 @@ def _find_card_contours(
     )
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     thresh = cv2.dilate(thresh, kernel, iterations=2)
+
+    if debug:
+        debug.save_edge_map("adaptive_thresh", thresh)
+
     for retr_mode in (cv2.RETR_EXTERNAL, cv2.RETR_TREE):
         contours, _ = cv2.findContours(thresh, retr_mode, cv2.CHAIN_APPROX_SIMPLE)
         _collect(contours)
 
     # Strategy 3: HSV color segmentation for colored card borders
     if original_bgr is not None:
-        _collect_hsv_contours(original_bgr, _collect)
+        _collect_hsv_contours(original_bgr, _collect, debug=debug)
 
     return candidates
 
@@ -125,6 +183,7 @@ def _find_card_contours(
 def _collect_hsv_contours(
     image: NDArray[np.uint8],
     collect_fn: Callable,
+    debug: DebugWriter | None = None,
 ) -> None:
     """Find card contours using HSV color ranges for card borders."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -142,12 +201,17 @@ def _collect_hsv_contours(
         [([15, 40, 100], [35, 255, 255]), ([10, 30, 120], [25, 255, 255])],
     ]
 
-    for ranges in color_groups:
+    group_names = ["hsv_red_orange", "hsv_yellow_gold"]
+    for name, ranges in zip(group_names, color_groups, strict=True):
         mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
         for lower, upper in ranges:
             mask |= cv2.inRange(hsv, np.array(lower), np.array(upper))
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=3)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        if debug:
+            debug.save_edge_map(name, mask)
+
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         collect_fn(contours)
 
@@ -221,6 +285,89 @@ def _refine_corners_from_hull(
         return box.astype(np.float32)
 
     return corners
+
+
+def _contour_quality(
+    contour: NDArray[np.uint8],
+    corners: NDArray[np.float32],
+    image_area: float,
+) -> float:
+    """Score a candidate contour by shape quality (0-1).
+
+    Combines three metrics:
+    - **Compactness**: contour area / convex-hull area.  A clean card
+      contour should be >= 0.85; merged card + ground blobs score lower.
+    - **Rectangularity**: contour area / minAreaRect area.  Perfect
+      rectangles score 1.0; irregular shapes score worse.
+    - **Aspect ratio closeness**: 1 - normalised distance from the ideal
+      5 : 7 card ratio.
+
+    All three are averaged to a 0-1 score.
+    """
+    contour_area = cv2.contourArea(contour)
+    if contour_area <= 0:
+        return 0.0
+
+    # Compactness
+    hull = cv2.convexHull(contour)
+    hull_area = cv2.contourArea(hull)
+    compactness = contour_area / hull_area if hull_area > 0 else 0.0
+
+    # Rectangularity
+    rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect)
+    rect_area = cv2.contourArea(box.reshape(4, 1, 2))
+    rectangularity = contour_area / rect_area if rect_area > 0 else 0.0
+
+    # Aspect ratio closeness (from the extracted corners, not the contour)
+    tl, tr, br, bl = corners
+    width_top = float(np.linalg.norm(tr - tl))
+    width_bottom = float(np.linalg.norm(br - bl))
+    height_left = float(np.linalg.norm(bl - tl))
+    height_right = float(np.linalg.norm(br - tr))
+    avg_width = (width_top + width_bottom) / 2
+    avg_height = (height_left + height_right) / 2
+    if avg_height == 0 or avg_width == 0:
+        return 0.0
+    short = min(avg_width, avg_height)
+    long = max(avg_width, avg_height)
+    ratio = short / long
+    ar_delta = abs(ratio - CARD_ASPECT_RATIO)
+    aspect_score = max(0.0, 1.0 - ar_delta / ASPECT_RATIO_TOLERANCE)
+
+    # Size factor — prefer contours that are a reasonable fraction of the
+    # image (not tiny noise, not the entire frame).
+    area_frac = contour_area / image_area
+    size_score = min(1.0, area_frac / 0.05)  # saturates at 5 % of image
+
+    return (compactness + rectangularity + aspect_score + size_score) / 4.0
+
+
+def _corner_edge_fraction(
+    corners: NDArray[np.float32],
+    edge_map: np.ndarray,
+) -> float:
+    """Return the fraction of corners that sit near a strong Canny edge.
+
+    For each of the four corners, sample a square patch of radius
+    *_EDGE_VERIFY_RADIUS* in *edge_map*.  A corner is "edge-backed" if
+    any pixel in that patch is non-zero.
+
+    Detections whose corners land on featureless areas (ground, sky) will
+    return a low fraction, signalling a bad crop.
+    """
+    h, w = edge_map.shape[:2]
+    backed = 0
+    for pt in corners:
+        cx, cy = round(pt[0]), round(pt[1])
+        x0 = max(0, cx - _EDGE_VERIFY_RADIUS)
+        y0 = max(0, cy - _EDGE_VERIFY_RADIUS)
+        x1 = min(w, cx + _EDGE_VERIFY_RADIUS + 1)
+        y1 = min(h, cy + _EDGE_VERIFY_RADIUS + 1)
+        patch = edge_map[y0:y1, x0:x1]
+        if patch.size > 0 and np.any(patch > 0):
+            backed += 1
+    return backed / 4.0
 
 
 def _has_card_aspect_ratio(corners: NDArray[np.float32]) -> bool:

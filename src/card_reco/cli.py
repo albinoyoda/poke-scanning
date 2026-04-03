@@ -35,6 +35,15 @@ def main(argv: list[str] | None = None) -> None:
         default=40.0,
         help="Max combined hash distance for a match (default: 40.0)",
     )
+    id_parser.add_argument(
+        "--debug",
+        type=str,
+        nargs="?",
+        const="debug",
+        default=None,
+        metavar="DIR",
+        help="Save debug images to DIR (default: debug/)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -52,11 +61,20 @@ def _cmd_identify(args: argparse.Namespace) -> None:
         print(f"Error: Image not found: {image_path}", file=sys.stderr)
         sys.exit(1)
 
+    debug = None
+    if args.debug is not None:
+        # pylint: disable-next=import-outside-toplevel
+        from card_reco.debug import DebugWriter
+
+        debug = DebugWriter(args.debug)
+        print(f"Debug output: {debug.output_dir.resolve()}")
+
     results = identify_cards(
         image_path,
         db_path=args.db,
         top_n=args.top_n,
         threshold=args.threshold,
+        debug=debug,
     )
 
     if not results:

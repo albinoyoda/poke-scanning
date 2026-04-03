@@ -191,7 +191,7 @@ class TestAxisAlignedSingleCards:
       - shining_kabutops_108_105: ~57  (good)
       - pidgeot_12_112:           ~54  (good — improved by area-diverse NMS)
       - shining_raichu:           ~58  (good — improved by area-diverse NMS)
-      - treecko_75_109:           ~61  (marginal — best detection is card #1)
+      - treecko_75_109:           ~55  (good — improved by quality scoring)
       - xerneas_12_25:            ~84  (poor — photo-vs-scan gap)
     """
 
@@ -232,6 +232,7 @@ class TestAxisAlignedSingleCards:
             "pikachu-v-swsh061.png",
             "shining_kabutops_108_105.png",
             "shining_raichu.png",
+            "treecko_75_109.png",
         ],
     )
     def test_card_identified(self, image_name: str) -> None:
@@ -251,10 +252,6 @@ class TestAxisAlignedSingleCards:
     @pytest.mark.parametrize(
         ("image_name", "reason"),
         [
-            pytest.param(
-                "treecko_75_109.png",
-                "Combined distance ~61 just above default threshold",
-            ),
             pytest.param(
                 "xerneas_12_25.png",
                 "Combined distance ~84, photo-vs-scan gap too large",

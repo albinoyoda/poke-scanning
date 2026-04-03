@@ -66,3 +66,25 @@ After making any code change, always:
    If the score is below 10.00, fix all issues before considering the change complete.
 
 6. If the repo architechture or data layout has changed, update this file or relevant files in `docs/` accordingly.
+
+## Debugging Detection Failures
+
+The CLI has a `--debug` flag that writes intermediate pipeline images to a
+directory.  This is invaluable for diagnosing why a card fails detection or
+matching:
+
+```sh
+uv run card-reco identify data/tests/single_cards/tilted/moltres_151.png --debug debug/moltres
+```
+
+The output directory contains numbered PNGs for every pipeline stage (input,
+preprocessing, edge maps, candidates, corners, NMS, warped cards, match
+summaries).  See [docs/debug_output.md](../docs/debug_output.md) for a
+detailed guide on what each image shows and how to interpret match quality.
+
+**Agent workflow**: When investigating why a card is not detected or matched
+correctly, run the identify command with `--debug`, then inspect the
+resulting images using the image viewing tool.  Compare edge maps, candidate
+overlays, and corner placements to understand which pipeline stage is
+failing.  This is the primary way to diagnose algorithm issues and verify
+that code changes improve results.
