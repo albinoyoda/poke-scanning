@@ -1,9 +1,5 @@
 # Project Guidelines
 
-> **WARNING**: There is a bug in the VS Code Copilot extension where viewing
-> more than two images in a single session causes a 413 error and crashes the
-> session. Never call `view_image` more than twice per conversation.
-
 Pokemon card recognition pipeline: detects cards in photos via OpenCV contour
 analysis and perspective transforms, then identifies them by comparing
 perceptual hashes (ahash, phash, dhash, whash via `imagehash`) against a
@@ -92,3 +88,10 @@ resulting images using the image viewing tool.  Compare edge maps, candidate
 overlays, and corner placements to understand which pipeline stage is
 failing.  This is the primary way to diagnose algorithm issues and verify
 that code changes improve results.
+
+**Image viewing limit**: The VS Code Copilot extension has a bug where calling
+`view_image` more than twice in the main agent session causes a 413 error and
+crashes the session.  To inspect many debug images, use `runSubagent` —
+subagents are exempt from this limit and can safely view large batches of
+images.  Dispatch multiple subagents in parallel, each viewing ~10 images, and
+collect their descriptions.
