@@ -55,7 +55,7 @@ uv sync --dev
 
 ## After Every Code Change
 
-After making any code change, always:
+After making any code change, always (for all files, not just the ones you edited):
 
 1. **Add or update tests** for the changed code using `pytest`. Run them:
    ```sh
@@ -68,22 +68,22 @@ After making any code change, always:
 
 2. **Lint with ruff**:
    ```sh
-   uv run ruff check src/ tests/
+   uv run ruff check
    ```
 
 3. **Format with ruff**:
    ```sh
-   uv run ruff format src/ tests/
+   uv run ruff format
    ```
 
 4. **Type check with ty**:
    ```sh
-   uv run ty check src/ tests/
+   uv run ty check
    ```
 
 5. **Lint with pylint** — a score of **10.00/10** is required:
    ```sh
-   uv run pylint src/card_reco/
+   uv run pylint src/ tests/ scripts/
    ```
    If the score is below 10.00, fix all issues before considering the change complete.
 
