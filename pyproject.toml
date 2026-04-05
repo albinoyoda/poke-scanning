@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=7.4", "ruff>=0.4", "ty", "pylint>=3.0"]
+dev = ["pytest>=7.4", "pytest-xdist>=3.0", "ruff>=0.4", "ty", "pylint>=3.0"]
 
 [project.scripts]
 card-reco = "card_reco.cli:main"

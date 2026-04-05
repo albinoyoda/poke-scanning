@@ -58,6 +58,10 @@ After making any code change, always:
    ```sh
    uv run pytest
    ```
+   Use multiple workers to speed up the test suite (pytest-xdist is installed):
+   ```sh
+   uv run pytest -n 8
+   ```
 
 2. **Lint with ruff**:
    ```sh
