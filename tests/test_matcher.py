@@ -110,3 +110,248 @@ class TestCardMatcher:
                     assert results[0].rank == 1
                     assert results[1].rank == 2
                     assert results[0].distance <= results[1].distance
+
+    def test_relaxed_fallback_returns_clear_best(self):
+        """Fallback can return one clear winner above a strict threshold."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._build_db(tmpdir)
+            with CardMatcher(db_path) as matcher:
+                # One-bit deviation from Charizard: above threshold=0 but far
+                # better than Pikachu, so fallback should allow it.
+                query = CardHashes(
+                    ahash="ff00" * 15 + "ff01",
+                    phash="aa55" * 16,
+                    dhash="1234" * 16,
+                    whash="fedc" * 16,
+                )
+                strict = matcher.find_matches(query, top_n=5, threshold=0.0)
+                assert strict == []
+
+                relaxed = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=1.0,
+                )
+                assert len(relaxed) == 1
+                assert relaxed[0].card.id == "base1-4"
+                assert relaxed[0].distance > 0.0
+
+    def test_relaxed_fallback_requires_separation(self):
+        """Fallback should not trigger if top two candidates are too close
+        and they have different names (no consensus)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "close.db"
+            with HashDatabase(db_path) as db:
+                base_hash = "0" * 64
+                db.insert_card(
+                    card_id="card-a",
+                    name="Card A",
+                    set_id="test",
+                    set_name="Test",
+                    number="1",
+                    rarity="Common",
+                    image_path="a.png",
+                    hashes=CardHashes(
+                        ahash=base_hash[:-1] + "1",  # 1-bit difference from query
+                        phash=base_hash,
+                        dhash=base_hash,
+                        whash=base_hash,
+                    ),
+                )
+                db.insert_card(
+                    card_id="card-b",
+                    name="Card B",
+                    set_id="test",
+                    set_name="Test",
+                    number="2",
+                    rarity="Common",
+                    image_path="b.png",
+                    hashes=CardHashes(
+                        ahash=base_hash[:-1] + "3",  # 2-bit difference from query
+                        phash=base_hash,
+                        dhash=base_hash,
+                        whash=base_hash,
+                    ),
+                )
+                db.commit()
+
+            with CardMatcher(db_path) as matcher:
+                query = CardHashes(
+                    ahash="0" * 64,
+                    phash="0" * 64,
+                    dhash="0" * 64,
+                    whash="0" * 64,
+                )
+                results = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=1.0,
+                )
+                assert results == []
+
+    def test_relaxed_fallback_respects_headroom(self):
+        """Fallback should not trigger when the best distance is too large."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._build_db(tmpdir)
+            with CardMatcher(db_path) as matcher:
+                query = CardHashes(
+                    ahash="0" * 64,
+                    phash="0" * 64,
+                    dhash="0" * 64,
+                    whash="0" * 64,
+                )
+                results = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=0.0,
+                )
+                assert results == []
+
+    def test_consensus_fallback_same_name_cluster(self):
+        """Consensus fallback triggers when 2+ cards of the same name
+        cluster at the top, even without large separation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "consensus.db"
+            # Two Wigglytuff variants (same name) and one Clefable.
+            # Hash values chosen so both Wigglytuffs are close to the query
+            # and Clefable is slightly farther.
+            base = "0" * 64
+            with HashDatabase(db_path) as db:
+                db.insert_card(
+                    card_id="base2-16",
+                    name="Wigglytuff",
+                    set_id="base2",
+                    set_name="Jungle",
+                    number="16",
+                    rarity="Rare Holo",
+                    image_path="wiggly1.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "1",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.insert_card(
+                    card_id="base4-19",
+                    name="Wigglytuff",
+                    set_id="base4",
+                    set_name="Base Set 2",
+                    number="19",
+                    rarity="Rare Holo",
+                    image_path="wiggly2.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "3",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.insert_card(
+                    card_id="base2-17",
+                    name="Clefable",
+                    set_id="base2",
+                    set_name="Jungle",
+                    number="17",
+                    rarity="Rare Holo",
+                    image_path="clefable.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "7",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.commit()
+
+            with CardMatcher(db_path) as matcher:
+                query = CardHashes(
+                    ahash="0" * 64,
+                    phash="0" * 64,
+                    dhash="0" * 64,
+                    whash="0" * 64,
+                )
+                # Strict threshold excludes all; separation-based fails
+                # because the two Wigglytuffs are very close.
+                strict = matcher.find_matches(query, top_n=5, threshold=0.0)
+                assert strict == []
+
+                # Consensus fallback should find 2 Wigglytuffs and accept.
+                results = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=50.0,  # impossibly high — blocks separation
+                    min_consensus=2,
+                )
+                assert len(results) == 1
+                assert results[0].card.name == "Wigglytuff"
+
+    def test_consensus_fallback_requires_min_count(self):
+        """Consensus should not trigger if only one card of that name exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "no_consensus.db"
+            base = "0" * 64
+            with HashDatabase(db_path) as db:
+                db.insert_card(
+                    card_id="sv10-69",
+                    name="Electivire ex",
+                    set_id="sv10",
+                    set_name="Test",
+                    number="69",
+                    rarity="Rare",
+                    image_path="elec.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "1",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.insert_card(
+                    card_id="sv10-999",
+                    name="Pikachu",
+                    set_id="sv10",
+                    set_name="Test",
+                    number="999",
+                    rarity="Common",
+                    image_path="pika.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "3",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.commit()
+
+            with CardMatcher(db_path) as matcher:
+                query = CardHashes(
+                    ahash="0" * 64,
+                    phash="0" * 64,
+                    dhash="0" * 64,
+                    whash="0" * 64,
+                )
+                # Only 1 Electivire, not enough for consensus.
+                # Separation is ~0.33, much less than min_separation=50.
+                results = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=50.0,
+                    min_consensus=2,
+                )
+                assert results == []

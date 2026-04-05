@@ -170,11 +170,40 @@ class TestGridDetection:
                 found_ids.add(match.card.id)
 
         matched = expected_ids & found_ids
-        assert len(matched) >= 5, (
-            f"Expected at least 5/9 cards identified, got {len(matched)}/9.\n"
+        assert len(matched) >= 8, (
+            f"Expected at least 8/9 cards identified by exact ID, "
+            f"got {len(matched)}/9.\n"
             f"  Expected: {expected_ids}\n"
             f"  Found:    {found_ids}\n"
             f"  Matched:  {matched}"
+        )
+
+    def test_3x3_identification_by_name(self) -> None:
+        """Verify all 9 grid cards are identified by name.
+
+        Some cards may match a different set variant (e.g. Jungle vs
+        Base Set 2 Wigglytuff), which is acceptable when the matched
+        name is correct.  The name-consensus fallback enables this for
+        cards with high photo-vs-scan hash distances.
+        """
+        annotations = load_folder_annotations(MULTIPLE_DIR)
+        image_entry = annotations["images"][0]
+        image_path = MULTIPLE_DIR / image_entry["image"]
+        expected_names = {c["name"] for c in image_entry["cards"]}
+
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+
+        found_names: set[str] = set()
+        for match_list in results:
+            if match_list:
+                found_names.add(match_list[0].card.name)
+
+        matched_names = expected_names & found_names
+        assert len(matched_names) >= 9, (
+            f"Expected 9/9 cards identified by name, got {len(matched_names)}/9.\n"
+            f"  Expected: {expected_names}\n"
+            f"  Found:    {found_names}\n"
+            f"  Matched:  {matched_names}"
         )
 
 
@@ -192,6 +221,8 @@ class TestAxisAlignedSingleCards:
       - pidgeot_12_112:           ~54  (good — improved by area-diverse NMS)
       - shining_raichu:           ~58  (good — improved by area-diverse NMS)
       - treecko_75_109:           ~55  (good — improved by quality scoring)
+      - electivire_ex_69_182:     ~78  (via relaxed + whole-image fallback)
+      - wiggly_base_2:            ~82  (via consensus + whole-image fallback)
       - xerneas_12_25:            ~84  (poor — photo-vs-scan gap)
     """
 
@@ -205,11 +236,13 @@ class TestAxisAlignedSingleCards:
         "image_name",
         [
             "birthday-pikachu-24.png",
+            "electivire_ex_69_182.png",
             "pidgeot_12_112.png",
             "pikachu-v-swsh061.png",
             "shining_kabutops_108_105.png",
             "shining_raichu.png",
             "treecko_75_109.png",
+            "wiggly_base_2.png",
             "xerneas_12_25.png",
         ],
     )
@@ -228,6 +261,7 @@ class TestAxisAlignedSingleCards:
         "image_name",
         [
             "birthday-pikachu-24.png",
+            "electivire_ex_69_182.png",
             "pidgeot_12_112.png",
             "pikachu-v-swsh061.png",
             "shining_kabutops_108_105.png",
@@ -291,7 +325,7 @@ class TestAxisAlignedSingleCards:
         assert not failures, "Detection failures:\n" + "\n".join(failures)
 
     def test_axis_aligned_identification_rate(self, annotations: list[dict]) -> None:
-        """At least 5 of 7 axis-aligned cards are identified (current baseline)."""
+        """At least 7 of 9 axis-aligned cards are identified (current baseline)."""
         matched = 0
         for entry in annotations:
             image_path = SINGLE_AXIS_ALIGNED_DIR / entry["image"]
@@ -303,8 +337,40 @@ class TestAxisAlignedSingleCards:
                 matched += 1
 
         total = len(annotations)
-        assert matched >= 5, (
-            f"Identified {matched}/{total} axis-aligned cards, expected >= 5"
+        assert matched >= 7, (
+            f"Identified {matched}/{total} axis-aligned cards, expected >= 7"
+        )
+
+    @pytest.mark.parametrize(
+        ("image_name", "expected_name"),
+        [
+            ("electivire_ex_69_182.png", "Electivire ex"),
+            ("wiggly_base_2.png", "Wigglytuff"),
+        ],
+    )
+    def test_cropout_identified_by_name(
+        self, image_name: str, expected_name: str
+    ) -> None:
+        """Pre-cropped card photos match the correct card by name.
+
+        These are debug-pipeline crop-outs with heavy holo glare.
+        They are identified via the whole-image fallback combined with
+        relaxed matching (clear-winner separation or name consensus).
+        The exact set variant may differ from the annotation since the
+        holo pattern shifts hash distances between reprints.
+        """
+        image_path = SINGLE_AXIS_ALIGNED_DIR / image_name
+        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        assert len(results) >= 1, f"No results for {image_name}"
+
+        found_names: set[str] = set()
+        for match_list in results:
+            if match_list:
+                found_names.add(match_list[0].card.name)
+
+        assert expected_name in found_names, (
+            f"{image_name}: expected '{expected_name}' among top matches, "
+            f"got {found_names}"
         )
 
 
@@ -316,9 +382,9 @@ class TestRotatedSingleCards:
     The detector must find the card contour despite rotation and produce
     a correctly warped portrait image.
 
-    Current status:
-      - sandslash_skyridge_non_holo_93_144: ~25  (excellent)
-      - electivire_ex_69_182:              FAILS — holographic, textured bg
+        Current status:
+            - sandslash_skyridge_non_holo_93_144: ~25  (excellent)
+            - electivire_ex_69_182:              ~78  (passes via clear-winner fallback)
     """
 
     @pytest.fixture()
@@ -360,9 +426,8 @@ class TestRotatedSingleCards:
             f"{image_name}: expected {expected_id} in top-5 matches, got {found_ids}"
         )
 
-    @pytest.mark.xfail(reason="Holographic card on textured background — dist > 77")
-    def test_electivire_identified_xfail(self) -> None:
-        """Electivire rotated card — currently fails identification."""
+    def test_electivire_identified(self) -> None:
+        """Electivire rotated card is identified despite textured background."""
         image_name = "electivire_ex_69_182.png"
         expected_id = get_card_id(SINGLE_ROTATED_DIR, image_name)
         assert expected_id is not None

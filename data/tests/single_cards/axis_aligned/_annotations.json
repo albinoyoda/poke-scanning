@@ -27,6 +27,14 @@
         {
             "image": "xerneas_12_25.png",
             "card_id": "cel25-12"
+        },
+        {
+            "image": "electivire_ex_69_182.png",
+            "card_id": "sv10-69"
+        },
+        {
+            "image": "wiggly_base_2.png",
+            "card_id": "base4-19"
         }
     ]
 }

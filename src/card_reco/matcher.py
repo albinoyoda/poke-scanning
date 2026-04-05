@@ -76,12 +76,29 @@ class CardMatcher:
         hashes: CardHashes,
         top_n: int = 5,
         threshold: float = DEFAULT_THRESHOLD,
+        enable_relaxed_fallback: bool = False,
+        relaxed_headroom: float = 25.0,
+        min_separation: float = 15.0,
+        min_consensus: int = 2,
     ) -> list[MatchResult]:
         """Find the best matching cards for a set of input hashes.
 
         Returns up to top_n matches, sorted by weighted distance
         (lower = better). Only includes matches with combined distance
         below threshold.
+
+        When *enable_relaxed_fallback* is true and no match passes
+        *threshold*, a single fallback match may still be returned via
+        one of two strategies:
+
+        1. **Separation** — the best candidate distance is within
+           *relaxed_headroom* of *threshold* and the runner-up is at
+           least *min_separation* worse.
+        2. **Name consensus** — at least *min_consensus* reference cards
+           sharing the same name appear among the top candidates within
+           headroom.  Multiple variants of the same card clustering at
+           the top is a strong identification signal even when their
+           inter-variant separation is small.
         """
         cards, matrix = self._ensure_loaded()
         if not cards:
@@ -105,6 +122,40 @@ class CardMatcher:
         # Filter to candidates below threshold
         mask = combined <= threshold
         indices = np.flatnonzero(mask)
+
+        # Optional fallback for hard photos where the true card is a clear
+        # winner but still sits above the strict absolute threshold.
+        if len(indices) == 0 and enable_relaxed_fallback and len(combined) > 0:
+            order_all = np.argsort(combined)
+            best_idx = int(order_all[0])
+            best_dist = float(combined[best_idx])
+
+            if best_dist <= threshold + relaxed_headroom:
+                second_dist = (
+                    float(combined[int(order_all[1])])
+                    if len(order_all) > 1
+                    else float("inf")
+                )
+
+                # Strategy 1: clear separation from runner-up.
+                if (second_dist - best_dist) >= min_separation:
+                    indices = np.array([best_idx], dtype=np.int64)
+
+                # Strategy 2: name consensus — multiple reference cards
+                # with the same name cluster at the top.
+                elif 2 <= min_consensus <= len(order_all):
+                    best_name = cards[best_idx].name
+                    consensus_top = min(5, len(order_all))
+                    same_name_count = sum(
+                        1
+                        for k in range(consensus_top)
+                        if cards[int(order_all[k])].name == best_name
+                        and float(combined[int(order_all[k])])
+                        <= threshold + relaxed_headroom
+                    )
+                    if same_name_count >= min_consensus:
+                        indices = np.array([best_idx], dtype=np.int64)
+
         if len(indices) == 0:
             return []
 
