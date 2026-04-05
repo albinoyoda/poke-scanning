@@ -141,33 +141,50 @@ after regression testing confirms the above changes maintain accuracy.
 | `find_matches` (cumulative) | 6 315 ms (201 calls) | 7 632 ms (201 calls) | +20 % ¹ |
 | `detect_cards` | 288 ms | 323 ms | ~same |
 
-¹ The `find_matches` cumulative time increased slightly.  The vectorised
-`_name_group_fallback` (956 ms tottime for 126 calls) replaces
-`_build_name_groups` (1 371 ms for 127 calls) but the cumulative time
-including NumPy child calls (`reduce`, `sum`, `min`) is 2 782 ms.  This
-appears to be a measurement artefact from cProfile overhead on NumPy ufunc
-calls rather than a real regression — the 11 s pipeline-level savings
-confirm net improvement.
+¹ cProfile overhead on NumPy ufunc calls inflates the cumulative time.
 
-**Throughput**: 0.04 Hz → 0.08 Hz (2× faster).  Still 62× below 5 Hz target.
+---
+
+## Measured Results (Phase 1b: Step E – Drop whash)
+
+| Stage | Phase 1a | Phase 1b | Δ |
+|---|---|---|---|
+| **Full pipeline** | **12 280 ms** | **8 212 ms** | **−33.1 %** |
+| `compute_hashes` | 4 424 ms (173 calls) | 1 283 ms (183 calls) | −71.0 % |
+| `find_matches` (cumulative) | 7 632 ms (201 calls) | 6 771 ms (213 calls) | −11.3 % |
+| `_explore_crops` total | 10 652 ms (14 calls) | 7 397 ms (15 calls) | −30.5 % |
+| `_denoise_clahe` | 309 ms | 332 ms | ~same |
+| `detect_cards` | 323 ms | 277 ms | ~same |
+
+### Step F (hash_size 16→8) — reverted
+
+Reducing `hash_size` from 16 to 8 was tested but **reverted**: the 64-bit
+hashes lost too much discriminative power.  Cards matched to completely
+wrong entries (Shining Kabutops → Bill, Wigglytuff → Clefable, PSA
+Charizard → random cards).  The photo-vs-scan gap requires at least 256
+bits per hash for reliable identification.
+
+### Electivire regression — resolved
+
+Dropping whash shifted the combined distance formula from
+`(0.8·a + 1.0·p + 1.0·d + 0.8·w) / 3.6` to `(0.8·a + 1.0·p + 1.0·d) / 2.8`.
+The whash component was disproportionately penalising Electivire's holographic
+texture.  All three Electivire tests now pass (were xfail in Phase 1a).
+Identification rate restored to 7/9 axis-aligned cards.
+
+**Throughput**: 0.04 Hz → 0.12 Hz (2.9× faster overall).  Still 41× below 5 Hz.
 
 ### Remaining bottlenecks (priority order)
 
-1. **`whash` (wavelet hash)**: 3 121 ms of 4 424 ms hashing time (70 %).
-   Dropping whash (Change #3) would save ~3 s.
-2. **`find_matches`**: 7 632 ms cumulative.  Reducing hash_size from 16→8
-   (Change #4) would shrink the XOR+popcount workload by 4×.
-3. **`_explore_crops`**: Still 87 % of pipeline time.  Many crop variants are
-   tried for cards that never match.  Phase 2 (CNN/FAISS) would eliminate
-   the need for crop exploration entirely.
-
-### Regression notes
-
-Three Electivire ex tests marked `xfail`: the bilateral filter produces
-slightly different hash values than NLM for this borderline card (best
-distance ~83 vs threshold 60).  The card was only matched via relaxed
-fallback (headroom 85) with marginal separation.  Net identification rate
-for axis-aligned cards: 6/9 (was 7/9).
+1. **`find_matches`**: 6 771 ms cumulative (213 calls).  The brute-force
+   XOR+popcount over 20 149 × 256-bit × 3 hashes dominates.  Approximate
+   nearest neighbours (FAISS, VP-tree) would make this sub-millisecond.
+2. **`_explore_crops`**: 7 397 ms (90 % of pipeline time).  Many crop
+   variants tried for cards that never match.  A CNN embedding would
+   eliminate the need for crop exploration entirely.
+3. **`_name_group_fallback`**: 2 942 ms cumulative (139 calls).  Still
+   significant; could be reduced by caching partial results or switching
+   to FAISS top-k queries.
 
 ---
 

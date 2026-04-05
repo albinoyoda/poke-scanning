@@ -21,7 +21,6 @@ def _card(name: str, card_id: str = "test-1") -> CardRecord:
         ahash="0" * 64,
         phash="0" * 64,
         dhash="0" * 64,
-        whash="0" * 64,
     )
 
 

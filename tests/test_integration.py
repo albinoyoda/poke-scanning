@@ -261,13 +261,7 @@ class TestAxisAlignedSingleCards:
         "image_name",
         [
             "birthday-pikachu-24.png",
-            pytest.param(
-                "electivire_ex_69_182.png",
-                marks=pytest.mark.xfail(
-                    reason="Borderline match (dist ~83 vs threshold 60); "
-                    "bilateral filter replaces NLM denoiser for 100x speedup"
-                ),
-            ),
+            "electivire_ex_69_182.png",
             "pidgeot_12_112.png",
             "pikachu-v-swsh061.png",
             "shining_kabutops_108_105.png",
@@ -343,21 +337,14 @@ class TestAxisAlignedSingleCards:
                 matched += 1
 
         total = len(annotations)
-        assert matched >= 6, (
-            f"Identified {matched}/{total} axis-aligned cards, expected >= 6"
+        assert matched >= 7, (
+            f"Identified {matched}/{total} axis-aligned cards, expected >= 7"
         )
 
     @pytest.mark.parametrize(
         ("image_name", "expected_name"),
         [
-            pytest.param(
-                "electivire_ex_69_182.png",
-                "Electivire ex",
-                marks=pytest.mark.xfail(
-                    reason="Borderline match (dist ~83 vs threshold 60); "
-                    "bilateral filter replaces NLM denoiser for 100x speedup"
-                ),
-            ),
+            ("electivire_ex_69_182.png", "Electivire ex"),
             ("wiggly_base_2.png", "Wigglytuff"),
         ],
     )
@@ -439,10 +426,6 @@ class TestRotatedSingleCards:
             f"{image_name}: expected {expected_id} in top-5 matches, got {found_ids}"
         )
 
-    @pytest.mark.xfail(
-        reason="Borderline match (dist ~83 vs threshold 60); "
-        "bilateral filter replaces NLM denoiser for 100x speedup"
-    )
     def test_electivire_identified(self) -> None:
         """Electivire rotated card is identified despite textured background."""
         image_name = "electivire_ex_69_182.png"

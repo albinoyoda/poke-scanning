@@ -2,7 +2,7 @@
 
 Pokemon card recognition pipeline: detects cards in photos via OpenCV contour
 analysis and perspective transforms, then identifies them by comparing
-perceptual hashes (ahash, phash, dhash, whash via `imagehash`) against a
+perceptual hashes (ahash, phash, dhash via `imagehash`) against a
 pre-built SQLite reference database.
 
 See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for the full architecture,
@@ -30,7 +30,7 @@ src/card_reco/        # Library package
     nms.py            #   Non-max suppression, centroid dedup
     quality.py        #   Contour quality scoring, edge verification
     constants.py      #   Shared constants and CLAHE factory
-  hasher.py           # Perceptual hashing (ahash, phash, dhash, whash)
+  hasher.py           # Perceptual hashing (ahash, phash, dhash)
   matcher.py          # Vectorised NumPy hash matching
   database.py         # SQLite reference database wrapper
   models.py           # Dataclasses (DetectedCard, CardHashes, etc.)

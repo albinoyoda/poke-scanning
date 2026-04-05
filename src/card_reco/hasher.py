@@ -22,7 +22,6 @@ def compute_hashes_pil(pil_image: Image.Image) -> CardHashes:
         ahash=str(imagehash.average_hash(pil_image, hash_size=HASH_SIZE)),
         phash=str(imagehash.phash(pil_image, hash_size=HASH_SIZE)),
         dhash=str(imagehash.dhash(pil_image, hash_size=HASH_SIZE)),
-        whash=str(imagehash.whash(pil_image, hash_size=HASH_SIZE)),
     )
 
 

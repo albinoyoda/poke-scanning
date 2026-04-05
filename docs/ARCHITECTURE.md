@@ -27,7 +27,7 @@ Image → detect_cards() → [DetectedCard, …]
 | `card_reco/detector/nms.py` | Non-max suppression and centroid deduplication |
 | `card_reco/detector/quality.py` | Contour quality scoring and corner edge-fraction verification |
 | `card_reco/detector/constants.py` | Shared constants (`CARD_WIDTH`, `CARD_HEIGHT`, `CANNY_PAIRS`, etc.) and CLAHE factory |
-| `card_reco/hasher.py` | Perceptual hashing via `imagehash` (ahash, phash, dhash, whash) |
+| `card_reco/hasher.py` | Perceptual hashing via `imagehash` (ahash, phash, dhash) |
 | `card_reco/matcher.py` | Vectorised NumPy matching with weighted Hamming distance |
 | `card_reco/database.py` | SQLite wrapper for the reference hash database |
 | `card_reco/models.py` | Dataclasses: `DetectedCard`, `CardHashes`, `CardRecord`, `MatchResult` |
@@ -58,7 +58,7 @@ overlapping detections.
 
 ## Hashing (`hasher.py`)
 
-Each detected card image is converted to a PIL Image and hashed four ways
+Each detected card image is converted to a PIL Image and hashed three ways
 at `hash_size=16` (256-bit hashes, 64-char hex strings):
 
 | Hash | Algorithm | Strength |
@@ -66,15 +66,14 @@ at `hash_size=16` (256-bit hashes, 64-char hex strings):
 | `ahash` | Average hash | Fast, tolerant of minor changes |
 | `phash` | Perceptual hash (DCT) | Best overall texture matching |
 | `dhash` | Difference hash | Good edge/gradient sensitivity |
-| `whash` | Wavelet hash | Multi-scale frequency analysis |
 
 ## Matching (`matcher.py`)
 
 Brute-force linear scan over all reference cards. For each reference card,
-four Hamming distances are computed and combined with weights:
+three Hamming distances are computed and combined with weights:
 
 ```
-combined = (0.8·ahash + 1.0·phash + 1.0·dhash + 0.8·whash) / 3.6
+combined = (0.8·ahash + 1.0·phash + 1.0·dhash) / 2.8
 ```
 
 Results below the threshold (default 40.0) are sorted by distance.
@@ -88,7 +87,7 @@ Empirical analysis showed 90°/270° rotations never produce useful matches
 ## Reference Database (`database.py`)
 
 SQLite table `cards` with columns: `id`, `name`, `set_id`, `set_name`,
-`number`, `rarity`, `image_path`, `ahash`, `phash`, `dhash`, `whash`.
+`number`, `rarity`, `image_path`, `ahash`, `phash`, `dhash`.
 
 Built by `scripts/build_hash_db.py` from card images in
 `data/images/{set_id}/` and metadata in `data/metadata/cards/{set_id}.json`.

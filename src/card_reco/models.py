@@ -23,7 +23,6 @@ class CardHashes:
     ahash: str
     phash: str
     dhash: str
-    whash: str
 
 
 @dataclass
@@ -40,7 +39,6 @@ class CardRecord:
     ahash: str
     phash: str
     dhash: str
-    whash: str
 
 
 @dataclass

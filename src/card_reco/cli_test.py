@@ -56,7 +56,6 @@ class TestCli:
             ahash="0" * 64,
             phash="0" * 64,
             dhash="0" * 64,
-            whash="0" * 64,
         )
         match = MatchResult(card=card, distance=12.5, rank=1)
         mock_results = [[match]]

@@ -25,12 +25,11 @@ class TestComputeHashes:
         assert hashes.ahash
         assert hashes.phash
         assert hashes.dhash
-        assert hashes.whash
 
     def test_hashes_are_hex_strings(self):
         image = _make_solid_image()
         hashes = compute_hashes(image)
-        for h in [hashes.ahash, hashes.phash, hashes.dhash, hashes.whash]:
+        for h in [hashes.ahash, hashes.phash, hashes.dhash]:
             int(h, 16)  # should not raise
 
     def test_identical_images_have_zero_distance(self):
@@ -52,7 +51,6 @@ class TestComputeHashes:
             hamming_distance(h1.ahash, h2.ahash),
             hamming_distance(h1.phash, h2.phash),
             hamming_distance(h1.dhash, h2.dhash),
-            hamming_distance(h1.whash, h2.whash),
         ]
         assert any(d > 0 for d in distances)
 
@@ -67,7 +65,6 @@ class TestComputeHashes:
         assert h_np.ahash == h_pil.ahash
         assert h_np.phash == h_pil.phash
         assert h_np.dhash == h_pil.dhash
-        assert h_np.whash == h_pil.whash
 
 
 class TestHammingDistance:

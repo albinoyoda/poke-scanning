@@ -18,8 +18,7 @@ CREATE TABLE IF NOT EXISTS cards (
     image_path  TEXT NOT NULL,
     ahash       TEXT NOT NULL,
     phash       TEXT NOT NULL,
-    dhash       TEXT NOT NULL,
-    whash       TEXT NOT NULL
+    dhash       TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_cards_set_id ON cards(set_id);
@@ -27,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 """
 
 _CARD_COLUMNS = (
-    "id, name, set_id, set_name, number, rarity, image_path, ahash, phash, dhash, whash"
+    "id, name, set_id, set_name, number, rarity, image_path, ahash, phash, dhash"
 )
 
 
@@ -44,7 +43,6 @@ def _row_to_card(row: sqlite3.Row) -> CardRecord:
         ahash=row["ahash"],
         phash=row["phash"],
         dhash=row["dhash"],
-        whash=row["whash"],
     )
 
 
@@ -82,8 +80,8 @@ class HashDatabase:
             """
             INSERT OR REPLACE INTO cards
                 (id, name, set_id, set_name, number, rarity, image_path,
-                 ahash, phash, dhash, whash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ahash, phash, dhash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 card_id,
@@ -96,7 +94,6 @@ class HashDatabase:
                 hashes.ahash,
                 hashes.phash,
                 hashes.dhash,
-                hashes.whash,
             ),
         )
 

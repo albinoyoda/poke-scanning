@@ -14,7 +14,6 @@ def _sample_hashes() -> CardHashes:
         ahash="ff00" * 16,
         phash="aa55" * 16,
         dhash="1234" * 16,
-        whash="fedc" * 16,
     )
 
 

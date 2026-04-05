@@ -13,10 +13,9 @@ HASH_WEIGHTS: dict[str, float] = {
     "phash": 1.0,
     "dhash": 1.0,
     "ahash": 0.8,
-    "whash": 0.8,
 }
 
-_WEIGHT_ORDER = ("ahash", "phash", "dhash", "whash")
+_WEIGHT_ORDER = ("ahash", "phash", "dhash")
 _WEIGHTS_ARRAY = np.array([HASH_WEIGHTS[k] for k in _WEIGHT_ORDER], dtype=np.float64)
 _TOTAL_WEIGHT = float(_WEIGHTS_ARRAY.sum())
 
@@ -86,7 +85,7 @@ class CardMatcher:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self._db = HashDatabase(db_path) if db_path else HashDatabase()
         self._cards: list[CardRecord] | None = None
-        # shape (N, 4, hash_bits) — 4 hash types per card, each as bit array
+        # shape (N, 3, hash_bits) — 3 hash types per card, each as bit array
         self._hash_matrix: np.ndarray | None = None
         # Pre-built name→indices mapping for vectorised name-group fallback
         self._name_to_indices: dict[str, np.ndarray] | None = None
@@ -117,14 +116,14 @@ class CardMatcher:
         cards = self._db.get_all_cards()
         if not cards:
             self._cards = []
-            self._hash_matrix = np.empty((0, 4, 0), dtype=np.uint8)
+            self._hash_matrix = np.empty((0, 3, 0), dtype=np.uint8)
             self._name_to_indices = {}
             return self._cards, self._hash_matrix
 
-        # Build (N, 4, hash_bits) matrix from hex strings
+        # Build (N, 3, hash_bits) matrix from hex strings
         sample_bits = hex_to_bits(cards[0].ahash)
         n_bits = len(sample_bits)
-        matrix = np.empty((len(cards), 4, n_bits), dtype=np.uint8)
+        matrix = np.empty((len(cards), 3, n_bits), dtype=np.uint8)
 
         for i, card in enumerate(cards):
             for j, key in enumerate(_WEIGHT_ORDER):
@@ -232,9 +231,9 @@ class CardMatcher:
         if not cards:
             return []
 
-        # Build query vector (4, hash_bits)
+        # Build query vector (3, hash_bits)
         n_bits = matrix.shape[2]
-        query = np.empty((4, n_bits), dtype=np.uint8)
+        query = np.empty((3, n_bits), dtype=np.uint8)
         for j, key in enumerate(_WEIGHT_ORDER):
             query[j] = hex_to_bits(getattr(hashes, key))
 

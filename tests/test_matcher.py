@@ -26,7 +26,6 @@ class TestCardMatcher:
                     ahash="ff00" * 16,
                     phash="aa55" * 16,
                     dhash="1234" * 16,
-                    whash="fedc" * 16,
                 ),
             )
             # Card 2: Pikachu (different hashes)
@@ -42,7 +41,6 @@ class TestCardMatcher:
                     ahash="00ff" * 16,
                     phash="55aa" * 16,
                     dhash="4321" * 16,
-                    whash="cdef" * 16,
                 ),
             )
             db.commit()
@@ -56,7 +54,6 @@ class TestCardMatcher:
                     ahash="ff00" * 16,
                     phash="aa55" * 16,
                     dhash="1234" * 16,
-                    whash="fedc" * 16,
                 )
                 results = matcher.find_matches(query, top_n=5)
                 assert len(results) >= 1
@@ -72,7 +69,6 @@ class TestCardMatcher:
                     ahash="ff00" * 15 + "ff01",
                     phash="aa55" * 16,
                     dhash="1234" * 16,
-                    whash="fedc" * 16,
                 )
                 results = matcher.find_matches(query, top_n=5)
                 assert len(results) >= 1
@@ -83,12 +79,11 @@ class TestCardMatcher:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = self._build_db(tmpdir)
             with CardMatcher(db_path) as matcher:
-                # Very different hashes — all zeros (64 hex chars)
+                # Very different hashes — all zeros (16 hex chars)
                 query = CardHashes(
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 results = matcher.find_matches(query, top_n=5, threshold=5.0)
                 # With a tight threshold, we might not match
@@ -103,7 +98,6 @@ class TestCardMatcher:
                     ahash="ff00" * 16,
                     phash="aa55" * 16,
                     dhash="1234" * 16,
-                    whash="fedc" * 16,
                 )
                 results = matcher.find_matches(query, top_n=5, threshold=1000)
                 if len(results) >= 2:
@@ -136,7 +130,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "1",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.insert_card(
@@ -151,7 +144,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "3",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.insert_card(
@@ -166,7 +158,6 @@ class TestCardMatcher:
                         ahash=base[:-2] + "ff",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.commit()
@@ -176,7 +167,6 @@ class TestCardMatcher:
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 # Name-group separation succeeds: Electivire group at
                 # ~0.22 vs Pikachu group at ~1.78, separation ~1.56.
@@ -205,7 +195,6 @@ class TestCardMatcher:
                     ahash="ff00" * 15 + "ff01",
                     phash="aa55" * 16,
                     dhash="1234" * 16,
-                    whash="fedc" * 16,
                 )
                 strict = matcher.find_matches(query, top_n=5, threshold=0.0)
                 assert strict == []
@@ -241,7 +230,6 @@ class TestCardMatcher:
                         ahash=base_hash[:-1] + "1",  # 1-bit difference from query
                         phash=base_hash,
                         dhash=base_hash,
-                        whash=base_hash,
                     ),
                 )
                 db.insert_card(
@@ -256,7 +244,6 @@ class TestCardMatcher:
                         ahash=base_hash[:-1] + "3",  # 2-bit difference from query
                         phash=base_hash,
                         dhash=base_hash,
-                        whash=base_hash,
                     ),
                 )
                 db.commit()
@@ -266,7 +253,6 @@ class TestCardMatcher:
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 results = matcher.find_matches(
                     query,
@@ -287,7 +273,6 @@ class TestCardMatcher:
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 results = matcher.find_matches(
                     query,
@@ -321,7 +306,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "1",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.insert_card(
@@ -336,7 +320,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "3",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.insert_card(
@@ -351,7 +334,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "7",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.commit()
@@ -361,7 +343,6 @@ class TestCardMatcher:
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 # Strict threshold excludes all; separation-based fails
                 # because the two Wigglytuffs are very close.
@@ -403,7 +384,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "1",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.insert_card(
@@ -418,7 +398,6 @@ class TestCardMatcher:
                         ahash=base[:-1] + "3",
                         phash=base,
                         dhash=base,
-                        whash=base,
                     ),
                 )
                 db.commit()
@@ -428,7 +407,6 @@ class TestCardMatcher:
                     ahash="0" * 64,
                     phash="0" * 64,
                     dhash="0" * 64,
-                    whash="0" * 64,
                 )
                 # Only 1 Electivire, not enough for consensus.
                 # Separation is ~0.33, much less than min_separation=50.

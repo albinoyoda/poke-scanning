@@ -28,7 +28,6 @@ def _make_match(rank: int = 1, distance: float = 10.0) -> MatchResult:
         ahash="0" * 64,
         phash="0" * 64,
         dhash="0" * 64,
-        whash="0" * 64,
     )
     return MatchResult(card=card, distance=distance, rank=rank)
 
@@ -120,7 +119,7 @@ class TestDebugWriter:
         dw = DebugWriter(tmp_path / "debug")
         card_img = np.zeros((100, 80, 3), dtype=np.uint8)
         m = _make_match(1, 10.0)
-        m.distances = {"ahash": 5, "phash": 3, "dhash": 1, "whash": 1}
+        m.distances = {"ahash": 5, "phash": 3, "dhash": 1}
         dw.save_match_summary(0, card_img, [m])
         files = list(dw.output_dir.glob("*match*"))
         assert len(files) == 1

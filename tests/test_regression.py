@@ -47,12 +47,10 @@ class TestDatabaseIntegrity:
                 )
                 assert len(card.phash) == 64, f"{card.id} phash wrong length"
                 assert len(card.dhash) == 64, f"{card.id} dhash wrong length"
-                assert len(card.whash) == 64, f"{card.id} whash wrong length"
                 # Verify they're valid hex
                 int(card.ahash, 16)
                 int(card.phash, 16)
                 int(card.dhash, 16)
-                int(card.whash, 16)
 
     def test_db_card_lookup_by_id(self) -> None:
         with HashDatabase(DB_PATH) as db:
@@ -120,7 +118,6 @@ class TestHashConsistency:
         assert h1.ahash == h2.ahash
         assert h1.phash == h2.phash
         assert h1.dhash == h2.dhash
-        assert h1.whash == h2.whash
 
     def test_hash_matches_db_entry(self) -> None:
         """Verify that recomputing a hash matches what's stored in the DB."""
@@ -136,7 +133,6 @@ class TestHashConsistency:
             assert hashes.ahash == card.ahash
             assert hashes.phash == card.phash
             assert hashes.dhash == card.dhash
-            assert hashes.whash == card.whash
 
 
 @skip_no_data
