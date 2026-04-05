@@ -24,6 +24,17 @@ _AREA_DIVERSITY_THRESH = 0.85  # NMS keeps both detections when area ratio < thi
 _EDGE_VERIFY_RADIUS = 15  # Pixel radius for corner edge verification
 _MIN_CORNER_EDGE_FRAC = 0.5  # At least half the corners must sit near an edge
 
+# Destination corners for the standard portrait perspective warp.
+CARD_DST_PORTRAIT = np.array(
+    [
+        [0, 0],
+        [CARD_WIDTH - 1, 0],
+        [CARD_WIDTH - 1, CARD_HEIGHT - 1],
+        [0, CARD_HEIGHT - 1],
+    ],
+    dtype=np.float32,
+)
+
 
 def detect_cards(
     image: NDArray[np.uint8],
@@ -111,6 +122,11 @@ def detect_cards(
     # Remove overlapping detections
     before_nms = len(detected)
     detected = _non_max_suppression(detected, overlap_thresh=0.5)
+
+    # Second pass: centroid-distance dedup.  Multiple edge strategies
+    # often find slightly different contours for the same card, leading
+    # to near-duplicate detections that the IoU-based NMS misses.
+    detected = _centroid_dedup(detected)
 
     if debug:
         debug.save_nms_result(image, before_nms, detected)
@@ -655,6 +671,58 @@ def _non_max_suppression(
     return keep
 
 
+def _centroid_dedup(
+    detections: list[DetectedCard],
+    min_dist_frac: float = 0.15,
+) -> list[DetectedCard]:
+    """Remove near-duplicate detections whose centroids are close.
+
+    Multiple edge-detection strategies often find slightly different
+    contours for the same physical card.  When two detections have
+    centroids within *min_dist_frac* of the smaller detection's
+    diagonal **and** similar area, the lower-confidence one is dropped.
+
+    Detections that differ significantly in area (ratio below
+    *_AREA_DIVERSITY_THRESH*) are always kept, preserving
+    different-scale crops such as a card inside a graded slab.
+    """
+    if len(detections) <= 1:
+        return detections
+
+    detections.sort(key=lambda d: d.confidence, reverse=True)
+    keep: list[DetectedCard] = []
+
+    for det in detections:
+        cx = float(det.corners[:, 0].mean())
+        cy = float(det.corners[:, 1].mean())
+        det_area = float(cv2.contourArea(det.corners.reshape(4, 1, 2).astype(np.int32)))
+        rect = cv2.boundingRect(det.corners.astype(np.int32))
+        diag = float(np.sqrt(rect[2] ** 2 + rect[3] ** 2))
+
+        suppressed = False
+        for kept in keep:
+            # Skip suppression when areas differ significantly.
+            kept_area = float(
+                cv2.contourArea(kept.corners.reshape(4, 1, 2).astype(np.int32))
+            )
+            max_area = max(det_area, kept_area)
+            if max_area > 0:
+                area_ratio = min(det_area, kept_area) / max_area
+                if area_ratio < _AREA_DIVERSITY_THRESH:
+                    continue
+
+            kcx = float(kept.corners[:, 0].mean())
+            kcy = float(kept.corners[:, 1].mean())
+            dist = float(np.sqrt((cx - kcx) ** 2 + (cy - kcy) ** 2))
+            if dist < diag * min_dist_frac:
+                suppressed = True
+                break
+        if not suppressed:
+            keep.append(det)
+
+    return keep
+
+
 def _compute_overlap(
     corners1: NDArray[np.float32], corners2: NDArray[np.float32]
 ) -> float:
@@ -696,15 +764,7 @@ def _four_point_transform(
     image: NDArray[np.uint8], corners: NDArray[np.float32]
 ) -> NDArray[np.uint8]:
     """Apply a perspective transform to extract a top-down view of a card."""
-    dst = np.array(
-        [
-            [0, 0],
-            [CARD_WIDTH - 1, 0],
-            [CARD_WIDTH - 1, CARD_HEIGHT - 1],
-            [0, CARD_HEIGHT - 1],
-        ],
-        dtype=np.float32,
-    )
+    dst = CARD_DST_PORTRAIT.copy()
 
     # Determine if the card is in landscape orientation
     tl, tr, br, bl = corners
