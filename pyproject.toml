@@ -75,4 +75,5 @@ disable = [
 
 # --- Pytest ---
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src"]
+python_files = ["test_*.py", "*_test.py"]
