@@ -20,10 +20,25 @@ module map, data layout, performance profile, and improvement roadmap.
 ## Project Layout
 
 ```
-src/card_reco/        # Library: detector, hasher, matcher, database, models, cli
+src/card_reco/        # Library package
+  __init__.py         # Thin re-export layer (public API)
+  pipeline.py         # Pipeline orchestration, crop exploration, preprocessing
+  detector/           # Card detection subpackage
+    __init__.py       #   Top-level orchestrator: detect_cards()
+    strategies.py     #   Detection strategies (Canny, adaptive, HSV, Hough)
+    corners.py        #   Corner extraction, refinement, ordering
+    nms.py            #   Non-max suppression, centroid dedup
+    quality.py        #   Contour quality scoring, edge verification
+    constants.py      #   Shared constants and CLAHE factory
+  hasher.py           # Perceptual hashing (ahash, phash, dhash, whash)
+  matcher.py          # Vectorised NumPy hash matching
+  database.py         # SQLite reference database wrapper
+  models.py           # Dataclasses (DetectedCard, CardHashes, etc.)
+  debug.py            # Debug image writer
+  cli.py              # CLI entry point
 scripts/              # Data download, DB build, debugging utilities
 data/                 # Reference images, metadata, hash DB, test photos
-tests/                # Unit + integration tests (pytest)
+tests/                # Integration tests (pytest)
 docs/                 # Architecture docs, known issues
 ```
 

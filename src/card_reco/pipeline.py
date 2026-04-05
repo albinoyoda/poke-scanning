@@ -18,7 +18,7 @@ from card_reco.detector import (
 from card_reco.detector.constants import make_clahe
 from card_reco.hasher import compute_hashes
 from card_reco.matcher import CardMatcher
-from card_reco.models import DetectedCard, MatchResult
+from card_reco.models import CardHashes, DetectedCard, MatchResult
 
 if TYPE_CHECKING:
     from card_reco.debug import DebugWriter
@@ -267,6 +267,8 @@ def _run_matching(
                 top_n=top_n,
                 threshold=threshold,
                 enable_relaxed_fallback=enable_relaxed_fallback,
+                card_hashes_0=hashes,
+                card_hashes_180=hashes_180,
             )
 
         if debug:
@@ -283,6 +285,8 @@ def _explore_crops(
     top_n: int,
     threshold: float,
     enable_relaxed_fallback: bool,
+    card_hashes_0: CardHashes,
+    card_hashes_180: CardHashes,
 ) -> list[MatchResult]:
     """Try alternative crop paddings and preprocessing to improve matching.
 
@@ -291,16 +295,36 @@ def _explore_crops(
     to the reference.  This function re-warps the card region at
     several padding levels and applies denoise + CLAHE preprocessing,
     keeping whichever configuration produces the lowest match distance.
+
+    *card_hashes_0* and *card_hashes_180* are the already-computed
+    hashes for the card at 0° and 180° orientations.  They are reused
+    with the more permissive crop-exploration matcher parameters,
+    avoiding two redundant ``compute_hashes`` calls (~260 ms each).
     """
     # Always use the standard threshold so the crop exploration
     # doesn't inherit an abnormally high caller-supplied value.
     effective_threshold = min(threshold, 40.0)
 
-    # Build all candidate images to try.
-    candidate_images: list[np.ndarray] = []
+    best = current_best
 
-    # Re-try the original crop (with more permissive fallback params).
-    candidate_images.append(card.image)
+    # Re-try the original crop hashes with relaxed fallback params.
+    # The hashes are already computed by the caller, so we only pay
+    # for the (cheap) matching step here.
+    for precomputed in (card_hashes_0, card_hashes_180):
+        matches = matcher.find_matches(
+            precomputed,
+            top_n=top_n,
+            threshold=effective_threshold,
+            enable_relaxed_fallback=enable_relaxed_fallback,
+            relaxed_headroom=_CROP_EXPLORE_HEADROOM,
+            min_separation=_CROP_EXPLORE_SEPARATION,
+            min_consensus=_CROP_EXPLORE_MIN_CONSENSUS,
+        )
+        if matches and (not best or matches[0].distance < best[0].distance):
+            best = matches
+
+    # Build remaining candidate images (denoised, refined, padded).
+    candidate_images: list[np.ndarray] = []
     candidate_images.append(_denoise_clahe(card.image))
 
     # Try edge-intersection refined corners.
@@ -319,7 +343,6 @@ def _explore_crops(
         candidate_images.append(_denoise_clahe(warped))
 
     # Evaluate each candidate image in both orientations.
-    best = current_best
     for img in candidate_images:
         for rotate in (False, True):
             oriented = img

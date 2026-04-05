@@ -19,17 +19,24 @@ Image → detect_cards() → [DetectedCard, …]
 
 | Module | Responsibility |
 |---|---|
-| `card_reco/__init__.py` | Public API: `identify_cards()`, `identify_cards_from_array()` |
-| `card_reco/detector.py` | OpenCV contour-based card detection and perspective normalisation |
+| `card_reco/__init__.py` | Public API re-exports: `identify_cards()`, `identify_cards_from_array()` |
+| `card_reco/pipeline.py` | Pipeline orchestration, crop exploration, preprocessing helpers |
+| `card_reco/detector/__init__.py` | Top-level detection orchestrator: `detect_cards()`, `_four_point_transform()` |
+| `card_reco/detector/strategies.py` | Detection strategies: Canny, adaptive threshold, HSV segmentation, Hough quads |
+| `card_reco/detector/corners.py` | Corner extraction, refinement (`refine_corners_from_hull`, `refine_corners_edge_intersect`), ordering, aspect-ratio checks |
+| `card_reco/detector/nms.py` | Non-max suppression and centroid deduplication |
+| `card_reco/detector/quality.py` | Contour quality scoring and corner edge-fraction verification |
+| `card_reco/detector/constants.py` | Shared constants (`CARD_WIDTH`, `CARD_HEIGHT`, `CANNY_PAIRS`, etc.) and CLAHE factory |
 | `card_reco/hasher.py` | Perceptual hashing via `imagehash` (ahash, phash, dhash, whash) |
 | `card_reco/matcher.py` | Vectorised NumPy matching with weighted Hamming distance |
 | `card_reco/database.py` | SQLite wrapper for the reference hash database |
 | `card_reco/models.py` | Dataclasses: `DetectedCard`, `CardHashes`, `CardRecord`, `MatchResult` |
+| `card_reco/debug.py` | Debug image writer for pipeline visualisation |
 | `card_reco/cli.py` | CLI entry point (`card-reco identify <image>`) |
 
-## Detection Pipeline (`detector.py`)
+## Detection Pipeline (`detector/`)
 
-Three strategies run in parallel and merge candidates via centroid dedup:
+The detector is a subpackage with focused modules:
 
 1. **Canny edge detection** — two threshold pairs (50/150, 30/100) × two
    retrieval modes (EXTERNAL, TREE).
@@ -116,10 +123,6 @@ Each test subfolder contains `_annotations.json` with expected card IDs.
 | `find_cards.py` | Quick CLI card finder |
 | `find_sets.py` | Search available sets |
 | `check_cards.py` | Verify card data integrity |
-| `save_crops.py` | Save detected card crops for debugging |
-| `debug_detector.py` | Visualise detection pipeline |
-| `debug_detector2.py` | Additional detection debugging |
-| `debug_matching.py` | Visualise matching distances |
 
 ## Tech Stack
 
