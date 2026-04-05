@@ -48,7 +48,7 @@ def _extract_green_corners(edges_image: np.ndarray) -> np.ndarray:
     assert contours, "No green contour found in edges image"
 
     # Take the largest contour
-    largest = max(contours, key=lambda c: cv2.contourArea(c))
+    largest = max(contours, key=cv2.contourArea)
     peri = cv2.arcLength(largest, True)
 
     # Approximate to a polygon — should yield 4 corners for a rectangle

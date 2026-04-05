@@ -23,8 +23,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 from PIL import Image
+from torch import nn
 from torch.nn import functional as func
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
@@ -104,9 +104,12 @@ class CardPairDataset(Dataset):
         for i, p in enumerate(image_paths):
             try:
                 img = Image.open(p).convert("RGB")
-                img = img.resize((self.CACHE_SIZE, self.CACHE_SIZE), Image.BILINEAR)
+                img = img.resize(
+                    (self.CACHE_SIZE, self.CACHE_SIZE),
+                    Image.Resampling.BILINEAR,
+                )
                 self.images.append(np.asarray(img, dtype=np.uint8))
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 failed += 1
             if (i + 1) % 5000 == 0:
                 print(f"    {i + 1}/{len(image_paths)} loaded")
@@ -199,7 +202,7 @@ def nt_xent_loss(
 # ---------------------------------------------------------------------------
 
 
-def train(
+def train(  # pylint: disable=too-many-statements
     data_dir: Path,
     output_path: Path,
     *,
@@ -325,7 +328,7 @@ def train(
     print(f"  Model size: {size_mb:.1f} MB")
 
     # Verify
-    import onnxruntime as ort
+    import onnxruntime as ort  # pylint: disable=import-outside-toplevel
 
     session = ort.InferenceSession(str(output_path))
     result = session.run(None, {"input": dummy.numpy()})

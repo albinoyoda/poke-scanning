@@ -12,9 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 
 from card_reco import identify_cards
+from card_reco.detector import detect_cards
 from tests.test_integration import (
     GRADED_DIR,
     MULTIPLE_DIR,
@@ -43,7 +46,7 @@ skip_no_cnn = pytest.mark.skipif(
 
 
 @skip_no_cnn
-class TestCNNAxisAligned:
+class TestCNNAxisAligned:  # pylint: disable=too-few-public-methods
     """CNN identification of axis-aligned single-card images.
 
     All axis-aligned single-card images are correctly identified
@@ -88,7 +91,7 @@ class TestCNNAxisAligned:
 
 
 @skip_no_cnn
-class TestCNNRotated:
+class TestCNNRotated:  # pylint: disable=too-few-public-methods
     """CNN identification of rotated single-card images.
 
     Calibrated:
@@ -123,7 +126,7 @@ class TestCNNRotated:
 
 
 @skip_no_cnn
-class TestCNNTilted:
+class TestCNNTilted:  # pylint: disable=too-few-public-methods
     """CNN identification of tilted single-card images.
 
     All tilted single-card images are correctly identified
@@ -160,7 +163,7 @@ class TestCNNTilted:
 
 
 @skip_no_cnn
-class TestCNNGraded:
+class TestCNNGraded:  # pylint: disable=too-few-public-methods
     """CNN identification of PSA graded card."""
 
     def test_psa_charizard_identified(self) -> None:
@@ -188,11 +191,6 @@ class TestCNN3x3Grid:
 
     def test_3x3_detection_count(self) -> None:
         """Verify at least 9 cards are detected (detector is backend-agnostic)."""
-        import cv2
-        import numpy as np
-
-        from card_reco.detector import detect_cards
-
         image_path = MULTIPLE_DIR / "3x3_top_loaders.png"
         image = cv2.imread(str(image_path))
         assert image is not None

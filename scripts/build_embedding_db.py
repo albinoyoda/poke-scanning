@@ -42,7 +42,7 @@ def find_card_image(card: dict, data_dir: Path) -> Path | None:
     return None
 
 
-def main() -> None:
+def main() -> None:  # pylint: disable=too-many-statements
     parser = argparse.ArgumentParser(description="Build FAISS embedding index")
     parser.add_argument(
         "--data-dir",
@@ -147,7 +147,7 @@ def main() -> None:
             try:
                 pil_img = Image.open(all_image_paths[i]).convert("RGB")
                 batch_images.append(np.asarray(pil_img, dtype=np.uint8))
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 print(f"  Warning: {all_cards[i].id}: {e}", file=sys.stderr)
                 # Use zero vector for failed images.
                 batch_images.append(np.zeros((224, 224, 3), dtype=np.uint8))

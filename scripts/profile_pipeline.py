@@ -9,20 +9,18 @@ import time
 import cv2
 import numpy as np
 
+from card_reco.detector import detect_cards
+from card_reco.detector.constants import MAX_CARD_AREA_RATIO, MIN_CARD_AREA_RATIO
+from card_reco.detector.strategies import find_card_contours
+from card_reco.hasher import compute_hashes
+from card_reco.matcher import CardMatcher
+from card_reco.pipeline import _denoise_clahe, identify_cards_from_array
+
 # --- Stage-level profiling ---
 
 
-def profile_pipeline(image_path: str) -> None:
+def profile_pipeline(image_path: str) -> None:  # pylint: disable=too-many-statements
     """Profile each pipeline stage independently."""
-    from card_reco.detector import detect_cards
-    from card_reco.detector.constants import MAX_CARD_AREA_RATIO, MIN_CARD_AREA_RATIO
-    from card_reco.detector.strategies import find_card_contours
-    from card_reco.hasher import compute_hashes
-    from card_reco.matcher import CardMatcher
-    from card_reco.pipeline import (
-        _denoise_clahe,
-    )
-
     image = cv2.imread(image_path)
     if image is None:
         raise ValueError(f"Could not read image: {image_path}")
@@ -113,7 +111,7 @@ def profile_pipeline(image_path: str) -> None:
     matcher.preload()
     t_db_load = time.perf_counter() - t0
     print(f"  DB load + matrix build: {t_db_load * 1000:.1f} ms")
-    print(f"  Reference cards: {len(matcher._cards) if matcher._cards else 0}")
+    print(f"  Reference cards: {len(matcher._cards) if matcher._cards else 0}")  # pylint: disable=protected-access
 
     if detected:
         hashes = compute_hashes(detected[0].image)
@@ -148,7 +146,6 @@ def profile_pipeline(image_path: str) -> None:
 
     # --- 5. Full pipeline ---
     print("\n--- FULL PIPELINE ---")
-    from card_reco.pipeline import identify_cards_from_array
 
     # Warm up matcher
     matcher2 = CardMatcher()

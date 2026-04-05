@@ -178,7 +178,7 @@ class TestMatcherWithRealData:
 
 
 @skip_no_data
-class TestEndToEndPipeline:
+class TestEndToEndPipeline:  # pylint: disable=too-few-public-methods
     def test_identify_from_reference_image(self) -> None:
         """Load a reference card image as if it were a photo, match it."""
         with HashDatabase(DB_PATH) as db:

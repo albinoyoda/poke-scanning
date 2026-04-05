@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 
 import torch
-import torchvision.models as models
+from torchvision import models
 
 
 def main() -> None:
@@ -56,7 +56,7 @@ def main() -> None:
     print(f"Done. Model size: {size_mb:.1f} MB")
 
     # Verify the exported model produces correct output shape.
-    import onnxruntime as ort
+    import onnxruntime as ort  # pylint: disable=import-outside-toplevel
 
     session = ort.InferenceSession(str(output_path))
     result = session.run(None, {"input": dummy_input.numpy()})

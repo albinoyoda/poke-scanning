@@ -42,7 +42,7 @@ def find_card_image(card: dict, data_dir: Path) -> Path | None:
     return None
 
 
-def main() -> None:
+def main() -> None:  # pylint: disable=too-many-statements
     parser = argparse.ArgumentParser(description="Build perceptual hash database")
     parser.add_argument(
         "--data-dir",
@@ -148,7 +148,7 @@ def main() -> None:
                     if total_processed % 500 == 0:
                         db.commit()
 
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     print(
                         f"  Warning: Failed to hash {card_id}: {e}",
                         file=sys.stderr,

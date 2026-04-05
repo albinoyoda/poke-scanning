@@ -78,7 +78,7 @@ class TestRefineCornersFromHull:
         """Create a contour that forms a trapezoid (perspective-distorted card)."""
         # Top edge narrower than bottom — simulates a card tilting away
         pts = np.array([[120, 50], [280, 50], [320, 350], [80, 350]], dtype=np.int32)
-        return pts.reshape(-1, 1, 2)
+        return pts.reshape((-1, 1, 2))
 
     def test_hull_corners_differ_from_box(self):
         """Hull corners should capture the real trapezoid, not a rectangle."""
@@ -109,7 +109,7 @@ class TestRefineCornersFromHull:
         """When the hull can't provide 4 good corners, fall back to box."""
         # Near-degenerate contour — very thin sliver
         pts = np.array([[100, 100], [200, 100], [201, 105], [100, 105]], dtype=np.int32)
-        contour = pts.reshape(-1, 1, 2)
+        contour = pts.reshape((-1, 1, 2))
         rect = cv2.minAreaRect(contour)
         box = cv2.boxPoints(rect).astype(np.float32)
         _refine_corners_from_hull(contour, box)

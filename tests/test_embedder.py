@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from card_reco.embedder import EMBEDDING_DIM, CardEmbedder
 
@@ -61,8 +62,6 @@ class TestCardEmbedder:
         assert not np.allclose(emb1, emb2)
 
     def test_embed_pil(self, embedder: CardEmbedder) -> None:
-        from PIL import Image
-
         pil_img = Image.fromarray(np.zeros((200, 140, 3), dtype=np.uint8))
         emb = embedder.embed_pil(pil_img)
         assert emb.shape == (EMBEDDING_DIM,)

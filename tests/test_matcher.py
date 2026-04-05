@@ -197,7 +197,7 @@ class TestCardMatcher:
                     dhash="1234" * 16,
                 )
                 strict = matcher.find_matches(query, top_n=5, threshold=0.0)
-                assert strict == []
+                assert not strict
 
                 relaxed = matcher.find_matches(
                     query,
@@ -262,7 +262,7 @@ class TestCardMatcher:
                     relaxed_headroom=5.0,
                     min_separation=1.0,
                 )
-                assert results == []
+                assert not results
 
     def test_relaxed_fallback_respects_headroom(self):
         """Fallback should not trigger when the best distance is too large."""
@@ -282,7 +282,7 @@ class TestCardMatcher:
                     relaxed_headroom=5.0,
                     min_separation=0.0,
                 )
-                assert results == []
+                assert not results
 
     def test_consensus_fallback_same_name_cluster(self):
         """Consensus fallback triggers when 2+ cards of the same name
@@ -347,7 +347,7 @@ class TestCardMatcher:
                 # Strict threshold excludes all; separation-based fails
                 # because the two Wigglytuffs are very close.
                 strict = matcher.find_matches(query, top_n=5, threshold=0.0)
-                assert strict == []
+                assert not strict
 
                 # Consensus fallback should find 2 Wigglytuffs and accept.
                 # Two-stage matching returns all variants of the winning
@@ -419,4 +419,4 @@ class TestCardMatcher:
                     min_separation=50.0,
                     min_consensus=2,
                 )
-                assert results == []
+                assert not results

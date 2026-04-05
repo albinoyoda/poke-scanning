@@ -89,11 +89,11 @@ class TestDrawDetections:
 class TestScannerLifecycle:
     def test_init_defaults(self) -> None:
         scanner = Scanner()
-        assert scanner._db_path is None
-        assert scanner._monitor_index == 1
-        assert scanner._region is None
-        assert scanner._matcher is None
-        assert scanner._sct is None
+        assert scanner._db_path is None  # pylint: disable=protected-access
+        assert scanner._monitor_index == 1  # pylint: disable=protected-access
+        assert scanner._region is None  # pylint: disable=protected-access
+        assert scanner._matcher is None  # pylint: disable=protected-access
+        assert scanner._sct is None  # pylint: disable=protected-access
 
     def test_init_with_params(self) -> None:
         scanner = Scanner(
@@ -103,11 +103,11 @@ class TestScannerLifecycle:
             top_n=3,
             threshold=30.0,
         )
-        assert scanner._db_path == "test.db"
-        assert scanner._monitor_index == 2
-        assert scanner._region == (10, 20, 800, 600)
-        assert scanner._top_n == 3
-        assert scanner._threshold == 30.0
+        assert scanner._db_path == "test.db"  # pylint: disable=protected-access
+        assert scanner._monitor_index == 2  # pylint: disable=protected-access
+        assert scanner._region == (10, 20, 800, 600)  # pylint: disable=protected-access
+        assert scanner._top_n == 3  # pylint: disable=protected-access
+        assert scanner._threshold == 30.0  # pylint: disable=protected-access
 
 
 # ---------------------------------------------------------------------------
@@ -125,13 +125,13 @@ skip_no_data = pytest.mark.skipif(
 
 
 @skip_no_data
-class TestPreCreatedMatcher:
+class TestPreCreatedMatcher:  # pylint: disable=too-few-public-methods
     def test_same_results_with_external_matcher(self) -> None:
         """Passing a pre-created matcher should produce identical results."""
         import cv2  # pylint: disable=import-outside-toplevel
 
-        from card_reco.matcher import (
-            CardMatcher,  # pylint: disable=import-outside-toplevel
+        from card_reco.matcher import (  # pylint: disable=import-outside-toplevel
+            CardMatcher,
         )
         from card_reco.pipeline import (  # pylint: disable=import-outside-toplevel
             identify_cards_from_array,
