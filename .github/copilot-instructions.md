@@ -1,5 +1,9 @@
 # Project Guidelines
 
+> **WARNING**: There is a bug in the VS Code Copilot extension where viewing
+> more than two images in a single session causes a 413 error and crashes the
+> session. Never call `view_image` more than twice per conversation.
+
 Pokemon card recognition pipeline: detects cards in photos via OpenCV contour
 analysis and perspective transforms, then identifies them by comparing
 perceptual hashes (ahash, phash, dhash, whash via `imagehash`) against a
