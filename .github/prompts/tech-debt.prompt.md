@@ -6,7 +6,7 @@ Your task is to perform a thorough audit of the entire codebase and identify are
    * Code duplication (functions, logic, data structures, constants) across files or modules.
    * Logic distributed across multiple files that could be centralized into a single module or utility.
    * Invisible duplication such as repeated patterns, feature extraction, or data transformations that should be centralized.
-   * Missing or incomplete tests, especially for pure functions or decision logic. Every public function must have tests per project conventions.
+   * Missing or incomplete tests, especially for pure functions, algorithms, or logic. Every public function must have tests per project conventions.
    * Layers of indirection, long files, or "god modules" that exceed ~1000 lines without logical splits (tests not included).
    * Functions that have multiple responsibilities or side effects that could be split into smaller, more focused functions — functions should do one thing and do it well.
    * Hard‑coded values, magic numbers, or URLs that should be extracted into shared constants.
