@@ -35,6 +35,18 @@
         {
             "image": "wiggly_base_2.png",
             "card_id": "base4-19"
+        },
+        {
+            "image": "gengar_skyridge_h9.png",
+            "card_id": "ecard3-H9"
+        },
+        {
+            "image": "jolteon_gold_star.png",
+            "card_id": "ex16-101"
+        },
+        {
+            "image": "regirock_gold_star.png",
+            "card_id": "ex12-91"
         }
     ]
 }

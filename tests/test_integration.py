@@ -5,8 +5,8 @@ Each subfolder has an _annotations.json with expected card IDs.
 
 Required data:
     python scripts/download_reference_data.py --small \
-        --sets sv3pt5 base1 base2 base4 base5 base6 gym1 neo1 ex2 \
-               basep ex1 ex6 neo4 cel25 swshp sv10
+        --sets sv3pt5 base1 base2 base3 base4 base5 base6 gym1 neo1 ex2 \
+               basep ex1 ex6 neo4 cel25 swshp sv10 ecard3 ex12 ex16
     python scripts/build_hash_db.py --rebuild
 """
 

@@ -49,6 +49,96 @@
                     "location": "bottom-right"
                 }
             ]
+        },
+        {
+            "image": "3x3_starters.png",
+            "cards": [
+                {
+                    "card_id": "base4-67",
+                    "name": "Bulbasaur",
+                    "location": "top-left"
+                },
+                {
+                    "card_id": "base1-30",
+                    "name": "Ivysaur",
+                    "location": "top-center"
+                },
+                {
+                    "card_id": "base1-4",
+                    "name": "Charizard",
+                    "location": "top-right"
+                },
+                {
+                    "card_id": "base1-46",
+                    "name": "Charmander",
+                    "location": "middle-left"
+                },
+                {
+                    "card_id": "base1-24",
+                    "name": "Charmeleon",
+                    "location": "center"
+                },
+                {
+                    "card_id": "base1-15",
+                    "name": "Venusaur",
+                    "location": "middle-right"
+                },
+                {
+                    "card_id": "base4-93",
+                    "name": "Squirtle",
+                    "location": "bottom-left"
+                },
+                {
+                    "card_id": "base1-42",
+                    "name": "Wartortle",
+                    "location": "bottom-center"
+                },
+                {
+                    "card_id": "base1-2",
+                    "name": "Blastoise",
+                    "location": "bottom-right"
+                }
+            ]
+        },
+        {
+            "image": "7_cards.png",
+            "cards": [
+                {
+                    "card_id": "neo1-4",
+                    "name": "Feraligatr",
+                    "location": "top-left"
+                },
+                {
+                    "card_id": "neo1-10",
+                    "name": "Meganium",
+                    "location": "top-center"
+                },
+                {
+                    "card_id": "neo1-14",
+                    "name": "Slowking",
+                    "location": "top-right"
+                },
+                {
+                    "card_id": "neo1-2",
+                    "name": "Azumarill",
+                    "location": "middle-left"
+                },
+                {
+                    "card_id": "neo1-16",
+                    "name": "Togetic",
+                    "location": "center"
+                },
+                {
+                    "card_id": "base3-3",
+                    "name": "Ditto",
+                    "location": "bottom-left"
+                },
+                {
+                    "card_id": "base3-7",
+                    "name": "Hitmonlee",
+                    "location": "bottom-right"
+                }
+            ]
         }
     ]
 }
