@@ -23,6 +23,8 @@ from card_reco.models import CardHashes, DetectedCard, MatchResult
 
 if TYPE_CHECKING:
     from card_reco.debug import DebugWriter
+    from card_reco.embedder import CardEmbedder
+    from card_reco.faiss_index import CardIndex
 
 _RELAXED_FALLBACK_MIN_CONFIDENCE = 0.85
 _RELAXED_FALLBACK_HEADROOM = 25.0
@@ -129,6 +131,7 @@ def identify_cards(
     top_n: int = 5,
     threshold: float = 40.0,
     debug: DebugWriter | None = None,
+    backend: str = "hash",
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards in an image.
 
@@ -136,8 +139,11 @@ def identify_cards(
         image_path: Path to the input image.
         db_path: Path to the hash database. Uses default if None.
         top_n: Maximum number of match candidates per detected card.
-        threshold: Maximum combined hash distance to consider a match.
+        threshold: Maximum combined hash distance to consider a match
+            (hash backend) or minimum cosine similarity (cnn backend).
         debug: Optional DebugWriter for saving intermediate images.
+        backend: ``"hash"`` for perceptual hashing, ``"cnn"`` for CNN
+            embedding + FAISS search.
 
     Returns:
         A list of match lists — one per detected card in the image.
@@ -153,7 +159,12 @@ def identify_cards(
         raise ValueError(f"Could not read image: {image_path}")
 
     return identify_cards_from_array(
-        image, db_path=db_path, top_n=top_n, threshold=threshold, debug=debug
+        image,
+        db_path=db_path,
+        top_n=top_n,
+        threshold=threshold,
+        debug=debug,
+        backend=backend,
     )
 
 
@@ -165,6 +176,9 @@ def identify_cards_from_array(
     confident_threshold: float = 25.0,
     debug: DebugWriter | None = None,
     matcher: CardMatcher | None = None,
+    backend: str = "hash",
+    embedder: CardEmbedder | None = None,
+    card_index: CardIndex | None = None,
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards from a BGR numpy array.
 
@@ -181,6 +195,9 @@ def identify_cards_from_array(
     When *matcher* is provided it is used directly (and **not** closed
     by this function).  This allows callers that process many images to
     amortise the one-time database-load cost.
+
+    Set *backend* to ``"cnn"`` to use CNN embeddings + FAISS search.
+    Provide *embedder* and *card_index* to reuse pre-loaded resources.
     """
     detected = detect_cards(image, debug=debug)
 
@@ -193,6 +210,17 @@ def identify_cards_from_array(
 
     if not detected:
         return []
+
+    if backend == "cnn":
+        return _run_cnn_pipeline(
+            detected,
+            top_n=top_n,
+            threshold=threshold,
+            confident_threshold=confident_threshold,
+            debug=debug,
+            embedder=embedder,
+            card_index=card_index,
+        )
 
     all_results: list[list[MatchResult]] = []
 
@@ -404,3 +432,91 @@ def _explore_crops(
                     return best
 
     return best
+
+
+# ───────────────────────────────────────────────────────────────────
+#  CNN Embedding + FAISS pipeline
+# ───────────────────────────────────────────────────────────────────
+
+# Default CNN thresholds (cosine similarity scale, higher = better).
+_CNN_CONFIDENT_THRESHOLD = 0.70
+_CNN_MATCH_THRESHOLD = 0.40
+
+
+def _run_cnn_pipeline(  # pylint: disable=too-many-branches
+    detected: list[DetectedCard],
+    *,
+    top_n: int,
+    threshold: float,
+    confident_threshold: float,
+    debug: DebugWriter | None,
+    embedder: CardEmbedder | None,
+    card_index: CardIndex | None,
+) -> list[list[MatchResult]]:
+    """CNN embedding + FAISS search pipeline.
+
+    Much simpler than the hash pipeline: no crop exploration, no
+    name-group fallback.  Tries 0° and 180° orientations only.
+    """
+    # Lazy imports to avoid loading ONNX Runtime when using hash backend.
+    # pylint: disable=import-outside-toplevel
+    from card_reco.embedder import CardEmbedder as _Embedder
+    from card_reco.faiss_index import CardIndex as _Index
+
+    owns_embedder = embedder is None
+    owns_index = card_index is None
+    if embedder is None:
+        embedder = _Embedder()
+    if card_index is None:
+        card_index = _Index()
+
+    # Use CNN-appropriate thresholds unless caller overrode them.
+    # If the caller passed the default hash threshold (40.0), swap to
+    # the CNN default.  Otherwise honour the explicit value.
+    if threshold == 40.0:
+        threshold = _CNN_MATCH_THRESHOLD
+    if confident_threshold == 25.0:
+        confident_threshold = _CNN_CONFIDENT_THRESHOLD
+
+    all_results: list[list[MatchResult]] = []
+    claimed_corners: list[np.ndarray] = []
+
+    try:
+        for i, card in enumerate(detected):
+            if _is_claimed(card.corners, claimed_corners):
+                continue
+
+            # 0° orientation.
+            emb_0 = embedder.embed(card.image)
+            matches_0 = card_index.search(emb_0, top_k=top_n, threshold=threshold)
+
+            if matches_0 and matches_0[0].distance >= confident_threshold:
+                if debug:
+                    debug.save_match_summary(i, card.image, matches_0)
+                all_results.append(matches_0)
+                claimed_corners.append(card.corners)
+                continue
+
+            # 180° orientation.
+            rotated = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
+            emb_180 = embedder.embed(rotated)
+            matches_180 = card_index.search(emb_180, top_k=top_n, threshold=threshold)
+
+            # Keep the better orientation.
+            best = matches_0
+            if matches_180 and (not best or matches_180[0].distance > best[0].distance):
+                best = matches_180
+
+            if debug:
+                debug.save_match_summary(i, card.image, best)
+            all_results.append(best)
+
+            if best and best[0].distance >= confident_threshold:
+                claimed_corners.append(card.corners)
+    finally:
+        if owns_embedder:
+            del embedder
+        if owns_index:
+            del card_index
+
+    return all_results

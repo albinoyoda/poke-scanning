@@ -4,8 +4,11 @@
 
 `card_reco` is a Pokemon card recognition pipeline. Given a photo containing
 one or more Pokemon cards, it detects each card region, normalises it to a
-standard orientation, computes perceptual hashes, and matches the hashes
-against a pre-built SQLite reference database.
+standard orientation, and identifies each card against a reference database.
+
+Two matching backends are available:
+
+### Hash backend (default: `--backend hash`)
 
 ```
 Image → detect_cards() → [DetectedCard, …]
@@ -14,6 +17,23 @@ Image → detect_cards() → [DetectedCard, …]
        if distance < confident_threshold: done
        else: compute_hashes(180°) → find_matches() → keep best
 ```
+
+Uses perceptual hashes (ahash, phash, dhash) compared by weighted Hamming
+distance against a SQLite reference database.
+
+### CNN backend (`--backend cnn`)
+
+```
+Image → detect_cards() → [DetectedCard, …]
+  └→ for each detection:
+       embedder.embed(0°) → float32[576] → index.search()
+       if similarity ≥ 0.70: done (claim region)
+       else: embedder.embed(180°) → index.search() → keep best
+```
+
+Uses MobileNetV3-Small (ONNX Runtime) to produce 576-dim L2-normalised
+embeddings, matched by cosine similarity via a FAISS `IndexFlatIP` index.
+Simpler pipeline: no crop exploration, no name-group fallback.
 
 ## Module Map
 
@@ -30,6 +50,8 @@ Image → detect_cards() → [DetectedCard, …]
 | `card_reco/hasher.py` | Perceptual hashing via `imagehash` (ahash, phash, dhash) |
 | `card_reco/matcher.py` | Vectorised NumPy matching with weighted Hamming distance |
 | `card_reco/database.py` | SQLite wrapper for the reference hash database |
+| `card_reco/embedder.py` | CNN embedding extraction via ONNX Runtime (MobileNetV3-Small) |
+| `card_reco/faiss_index.py` | FAISS-based vector index for card embedding search |
 | `card_reco/models.py` | Dataclasses: `DetectedCard`, `CardHashes`, `CardRecord`, `MatchResult` |
 | `card_reco/debug.py` | Debug image writer for pipeline visualisation |
 | `card_reco/cli.py` | CLI entry point (`card-reco identify <image>`) |
@@ -96,7 +118,10 @@ Built by `scripts/build_hash_db.py` from card images in
 
 ```
 data/
-├── card_hashes.db              # Reference hash database
+├── card_hashes.db              # Reference hash database (hash backend)
+├── mobilenet_v3_small.onnx     # CNN model (CNN backend, 0.3 MB)
+├── card_embeddings.faiss       # FAISS embedding index (CNN backend)
+├── card_embeddings_meta.json   # Card metadata sidecar for FAISS index
 ├── metadata/
 │   ├── sets.json               # Set index (from PokemonTCG/pokemon-tcg-data)
 │   └── cards/{set_id}.json     # Per-set card metadata
@@ -119,6 +144,8 @@ Each test subfolder contains `_annotations.json` with expected card IDs.
 |---|---|
 | `download_reference_data.py` | Download card metadata + images from PokemonTCG GitHub |
 | `build_hash_db.py` | Build/rebuild the SQLite hash database from local images |
+| `export_model.py` | Export MobileNetV3-Small to ONNX (requires torch, one-time) |
+| `build_embedding_db.py` | Build FAISS embedding index from reference card images |
 | `find_cards.py` | Quick CLI card finder |
 | `find_sets.py` | Search available sets |
 | `check_cards.py` | Verify card data integrity |
@@ -132,6 +159,8 @@ Each test subfolder contains `_annotations.json` with expected card IDs.
 | Computer vision | OpenCV (`opencv-python ≥ 4.8`) |
 | Image processing | Pillow (≥ 10.0), NumPy (≥ 1.24) |
 | Perceptual hashing | `imagehash` (≥ 4.3) |
+| CNN inference | ONNX Runtime (≥ 1.17) |
+| Vector search | FAISS-cpu (≥ 1.7) |
 | Reference DB | SQLite 3 (stdlib) |
 | Data download | requests, tqdm |
 | Linting | ruff (lint + format), pylint (score 10.00 required) |
@@ -189,10 +218,11 @@ DCT/wavelet transforms in pure Python/NumPy.
    and compare, and more tolerant of photo-vs-scan differences. The trade-off
    is lower discrimination between visually similar cards.
 
-5. **CNN embeddings** — Modern systems often use a small neural network
-   (MobileNet, EfficientNet) to produce a compact embedding vector, then
-   match via cosine similarity with FAISS or Annoy. This handles
-   perspective, lighting, and rotation far better than perceptual hashes.
+5. **~~CNN embeddings~~** — Implemented as the `cnn` backend. Uses
+   MobileNetV3-Small (pretrained on ImageNet) with ONNX Runtime and FAISS.
+   Currently 55% top-1 accuracy (vs ~85% for hash backend) due to generic
+   pretrained features. Fine-tuning on Pokemon card data would improve this
+   significantly.
 
 ### Estimated Impact of Further Improvements
 
@@ -203,4 +233,4 @@ For a 3 500-card database with 3 detections per image:
 | ~~Eliminate rotation brute-force~~ | ~~Done (2× on hashing)~~ | ~~Done~~ |
 | Reduce hash_size from 16 to 8 | ~2× on hashing | Low (needs DB rebuild) |
 | BK-tree indexing | ~2–5× on matching | Medium |
-| CNN embeddings + FAISS | ~50–100× + better accuracy | High |
+| ~~CNN embeddings + FAISS~~ | ~~Done (cnn backend)~~ | ~~Done~~ |

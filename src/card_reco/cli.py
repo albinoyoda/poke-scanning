@@ -44,6 +44,13 @@ def main(argv: list[str] | None = None) -> None:
         metavar="DIR",
         help="Save debug images to DIR (default: debug/)",
     )
+    id_parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["hash", "cnn"],
+        default="cnn",
+        help="Matching backend: hash (perceptual) or cnn (CNN+FAISS, default)",
+    )
 
     # scan command
     scan_parser = subparsers.add_parser(
@@ -114,6 +121,7 @@ def _cmd_identify(args: argparse.Namespace) -> None:
         top_n=args.top_n,
         threshold=args.threshold,
         debug=debug,
+        backend=args.backend,
     )
 
     if not results:

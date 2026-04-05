@@ -36,9 +36,9 @@ class CardRecord:
     number: str
     rarity: str
     image_path: str
-    ahash: str
-    phash: str
-    dhash: str
+    ahash: str = ""
+    phash: str = ""
+    dhash: str = ""
 
 
 @dataclass
@@ -47,5 +47,5 @@ class MatchResult:
 
     card: CardRecord
     distance: float
-    distances: dict[str, int] = field(default_factory=dict)
+    distances: dict[str, int | float] = field(default_factory=dict)
     rank: int = 0

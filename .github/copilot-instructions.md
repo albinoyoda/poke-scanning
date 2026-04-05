@@ -1,9 +1,10 @@
 # Project Guidelines
 
 Pokemon card recognition pipeline: detects cards in photos via OpenCV contour
-analysis and perspective transforms, then identifies them by comparing
-perceptual hashes (ahash, phash, dhash via `imagehash`) against a
-pre-built SQLite reference database.
+analysis and perspective transforms, then identifies them using either
+perceptual hashes (ahash, phash, dhash via `imagehash`) against a SQLite
+reference database, or CNN embeddings (MobileNetV3-Small via ONNX Runtime)
+matched by cosine similarity via a FAISS index.
 
 See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for the full architecture,
 module map, data layout, performance profile, and improvement roadmap.
@@ -12,8 +13,8 @@ module map, data layout, performance profile, and improvement roadmap.
 
 - **Language**: Python 3.10+
 - **Build**: hatchling, managed with uv
-- **Core deps**: OpenCV (`opencv-python`), NumPy, Pillow, `imagehash`
-- **Reference DB**: SQLite 3 (stdlib `sqlite3`)
+- **Core deps**: OpenCV (`opencv-python`), NumPy, Pillow, `imagehash`, ONNX Runtime, FAISS-cpu
+- **Reference DB**: SQLite 3 (stdlib `sqlite3`) for hashes; FAISS index for CNN embeddings
 - **Quality**: ruff (lint + format), ty (type checking), pylint (10.00/10 required)
 - **Tests**: pytest
 
@@ -33,6 +34,8 @@ src/card_reco/        # Library package
   hasher.py           # Perceptual hashing (ahash, phash, dhash)
   matcher.py          # Vectorised NumPy hash matching
   database.py         # SQLite reference database wrapper
+  embedder.py         # CNN embedding extraction (ONNX Runtime, MobileNetV3-Small)
+  faiss_index.py      # FAISS vector index for CNN embedding search
   models.py           # Dataclasses (DetectedCard, CardHashes, etc.)
   debug.py            # Debug image writer
   cli.py              # CLI entry point

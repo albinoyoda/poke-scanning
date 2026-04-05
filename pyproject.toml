@@ -8,13 +8,23 @@ dependencies = [
     "numpy>=1.24",
     "Pillow>=10.0",
     "imagehash>=4.3",
+    "onnxruntime>=1.17",
+    "faiss-cpu>=1.7",
     "requests>=2.31",
     "tqdm>=4.66",
     "mss>=9.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=7.4", "pytest-xdist>=3.0", "ruff>=0.4", "ty", "pylint>=3.0"]
+dev = [
+    "pytest>=7.4",
+    "pytest-xdist>=3.0",
+    "ruff>=0.4",
+    "ty",
+    "pylint>=3.0",
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
 
 [project.scripts]
 card-reco = "card_reco.cli:main"
