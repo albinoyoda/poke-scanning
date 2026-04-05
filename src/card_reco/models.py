@@ -13,6 +13,7 @@ class DetectedCard:
     image: NDArray[np.uint8]
     corners: NDArray[np.float32]
     confidence: float = 0.0
+    contour: NDArray[np.uint8] | None = field(default=None, repr=False)
 
 
 @dataclass

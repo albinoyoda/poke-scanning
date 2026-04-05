@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
-from card_reco.detector import CARD_DST_PORTRAIT, CARD_HEIGHT, CARD_WIDTH, detect_cards
+from card_reco.detector import (
+    CARD_DST_PORTRAIT,
+    CARD_HEIGHT,
+    CARD_WIDTH,
+    _refine_corners_edge_intersect,
+    detect_cards,
+)
 from card_reco.hasher import compute_hashes
 from card_reco.matcher import CardMatcher
 from card_reco.models import DetectedCard, MatchResult
@@ -288,6 +294,16 @@ def _explore_crops(
 
     # Try denoise + CLAHE on the original crop.
     _try_image(_denoise_clahe(card.image))
+
+    # Try edge-intersection refined corners.  approxPolyDP places
+    # corners on the rounded corner arc; fitting lines to the straight
+    # edge segments and intersecting them often yields a tighter crop.
+    if card.contour is not None:
+        refined = _refine_corners_edge_intersect(card.contour, card.corners)
+        if not np.array_equal(refined, card.corners):
+            warped_refined = _rewarp(source_image, refined)
+            _try_image(warped_refined)
+            _try_image(_denoise_clahe(warped_refined))
 
     # Try alternative crop paddings with preprocessing.
     for pct in _CROP_PADDINGS:

@@ -3,3 +3,5 @@
 - legendary collection/base set 2/base set might be difficult to distinguish.
 
 Would it be 
+
+

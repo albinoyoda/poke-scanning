@@ -24,6 +24,16 @@ _AREA_DIVERSITY_THRESH = 0.85  # NMS keeps both detections when area ratio < thi
 _EDGE_VERIFY_RADIUS = 15  # Pixel radius for corner edge verification
 _MIN_CORNER_EDGE_FRAC = 0.5  # At least half the corners must sit near an edge
 
+# Corner refinement: fit lines to straight edge segments, intersect to find
+# the true corner (outside the rounded arc).
+_CORNER_REFINE_TRIM = 0.15  # Fraction of edge length to skip at each end
+_CORNER_REFINE_PERP_MIN = 3.0  # Min perpendicular distance threshold (pixels)
+_CORNER_REFINE_PERP_SCALE = 0.02  # Perp threshold = max(min, scale * edge_len)
+_CORNER_REFINE_MIN_PTS = 15  # Minimum contour points per edge for a valid fit
+_CORNER_REFINE_MAX_SHIFT = 0.10  # Max displacement as fraction of min edge len
+_CORNER_REFINE_MAX_RMS = 5.0  # Max RMS residual (px) for a valid line fit
+
+
 # Destination corners for the standard portrait perspective warp.
 CARD_DST_PORTRAIT = np.array(
     [
@@ -110,7 +120,12 @@ def detect_cards(
 
         warped = _four_point_transform(image, corners)
         detected.append(
-            DetectedCard(image=warped, corners=corners, confidence=confidence)
+            DetectedCard(
+                image=warped,
+                corners=corners,
+                confidence=confidence,
+                contour=contour,
+            )
         )
         all_corners.append(corners)
         pct = area / image_area * 100
@@ -523,6 +538,104 @@ def _refine_corners_from_hull(
         return box.astype(np.float32)
 
     return corners
+
+
+def _refine_corners_edge_intersect(
+    contour: NDArray[np.uint8],
+    corners: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    """Refine corners by fitting lines to straight edge segments.
+
+    ``approxPolyDP`` places corners where the rounded corner arc meets a
+    straight edge.  This function fits lines to the middle portion of
+    each edge (skipping the rounded ends) and intersects adjacent lines
+    to find the true geometric corner — typically a few pixels outside
+    the card, giving a cleaner perspective warp.
+
+    Falls back to *corners* unchanged when the contour has too few
+    points for a reliable fit or the result looks wrong.
+    """
+    pts = contour.reshape(-1, 2).astype(np.float32)
+
+    fitted_lines: list[tuple[float, float, float, float]] = []
+    min_edge_len = float("inf")
+
+    for i in range(4):
+        c1 = corners[i]
+        c2 = corners[(i + 1) % 4]
+        edge_vec = c2 - c1
+        edge_len = float(np.linalg.norm(edge_vec))
+        if edge_len < 10:
+            return corners
+        min_edge_len = min(min_edge_len, edge_len)
+
+        edge_dir = edge_vec / edge_len
+        edge_normal = np.array([-edge_dir[1], edge_dir[0]], dtype=np.float32)
+
+        # Project every contour point onto this edge's coordinate frame.
+        rel = pts - c1
+        along = rel @ edge_dir  # distance along the edge
+        perp = rel @ edge_normal  # perpendicular distance from edge
+
+        # Keep points close to the line and away from the rounded corners.
+        perp_thresh = max(_CORNER_REFINE_PERP_MIN, edge_len * _CORNER_REFINE_PERP_SCALE)
+        trim = edge_len * _CORNER_REFINE_TRIM
+        mask = (np.abs(perp) < perp_thresh) & (along > trim) & (along < edge_len - trim)
+
+        edge_pts = pts[mask]
+        if len(edge_pts) < _CORNER_REFINE_MIN_PTS:
+            return corners
+
+        line = cv2.fitLine(edge_pts.reshape(-1, 1, 2), cv2.DIST_L2, 0, 0.01, 0.01)
+        vx, vy, x0, y0 = line.flatten()
+
+        # Verify fit quality: compute RMS perpendicular residual.
+        line_norm = np.array([-float(vy), float(vx)], dtype=np.float32)
+        residuals = (edge_pts - np.array([float(x0), float(y0)])) @ line_norm
+        rms = float(np.sqrt(np.mean(residuals**2)))
+        if rms > _CORNER_REFINE_MAX_RMS:
+            return corners  # Noisy edge — line fit is unreliable.
+
+        fitted_lines.append((float(vx), float(vy), float(x0), float(y0)))
+
+    # Intersect adjacent fitted lines to produce refined corners.
+    max_shift = min_edge_len * _CORNER_REFINE_MAX_SHIFT
+    refined = np.zeros((4, 2), dtype=np.float32)
+
+    for i in range(4):
+        # Corner[i] sits at the junction of edge (i-1) and edge i.
+        line_a = fitted_lines[(i - 1) % 4]
+        line_b = fitted_lines[i]
+
+        pt = _intersect_param_lines(line_a, line_b)
+        if pt is None:
+            return corners  # Nearly parallel — shouldn't happen for a card.
+
+        shift = np.array(pt) - corners[i]
+        if float(np.linalg.norm(shift)) > max_shift:
+            return corners  # Displacement too large; bail out.
+
+        refined[i] = pt
+
+    return refined
+
+
+def _intersect_param_lines(
+    line_a: tuple[float, float, float, float],
+    line_b: tuple[float, float, float, float],
+) -> tuple[float, float] | None:
+    """Intersect two lines in parametric form ``(vx, vy, x0, y0)``."""
+    vx1, vy1, x01, y01 = line_a
+    vx2, vy2, x02, y02 = line_b
+
+    denom = vx1 * vy2 - vy1 * vx2
+    if abs(denom) < 1e-8:
+        return None
+
+    dx = x02 - x01
+    dy = y02 - y01
+    t = (dx * vy2 - dy * vx2) / denom
+    return (x01 + t * vx1, y01 + t * vy1)
 
 
 def _contour_quality(
