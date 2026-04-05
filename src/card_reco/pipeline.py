@@ -443,7 +443,18 @@ _CNN_CONFIDENT_THRESHOLD = 0.70
 _CNN_MATCH_THRESHOLD = 0.40
 
 
-def _run_cnn_pipeline(  # pylint: disable=too-many-branches
+_CNN_CENTER_CROP = 0.85
+
+
+def _center_crop(image: np.ndarray, fraction: float) -> np.ndarray:
+    """Return a center crop of *image* at the given fraction (0-1)."""
+    h, w = image.shape[:2]
+    ch, cw = int(h * fraction), int(w * fraction)
+    y, x = (h - ch) // 2, (w - cw) // 2
+    return np.asarray(image[y : y + ch, x : x + cw], dtype=np.uint8)
+
+
+def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     detected: list[DetectedCard],
     *,
     top_n: int,
@@ -455,8 +466,9 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-branches
 ) -> list[list[MatchResult]]:
     """CNN embedding + FAISS search pipeline.
 
-    Much simpler than the hash pipeline: no crop exploration, no
-    name-group fallback.  Tries 0° and 180° orientations only.
+    For each detected card, tries 0° and 180° orientations at both
+    full frame and center-crop.  Duplicate detections of the same
+    physical card are resolved by keeping the highest-scoring match.
     """
     # Lazy imports to avoid loading ONNX Runtime when using hash backend.
     # pylint: disable=import-outside-toplevel
@@ -471,46 +483,43 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-branches
         card_index = _Index()
 
     # Use CNN-appropriate thresholds unless caller overrode them.
-    # If the caller passed the default hash threshold (40.0), swap to
-    # the CNN default.  Otherwise honour the explicit value.
     if threshold == 40.0:
         threshold = _CNN_MATCH_THRESHOLD
     if confident_threshold == 25.0:
         confident_threshold = _CNN_CONFIDENT_THRESHOLD
 
-    all_results: list[list[MatchResult]] = []
-    claimed_corners: list[np.ndarray] = []
+    # Phase 1: collect best match per detection across orientations
+    # and center-crop variants.
+    candidates: list[tuple[int, DetectedCard, list[MatchResult]]] = []
 
     try:
         for i, card in enumerate(detected):
+            best: list[MatchResult] = []
+
+            for variant in (card.image, _center_crop(card.image, _CNN_CENTER_CROP)):
+                for img in (
+                    variant,
+                    np.asarray(cv2.rotate(variant, cv2.ROTATE_180), dtype=np.uint8),
+                ):
+                    emb = embedder.embed(img)
+                    matches = card_index.search(emb, top_k=top_n, threshold=threshold)
+                    if matches and (not best or matches[0].distance > best[0].distance):
+                        best = matches
+
+            candidates.append((i, card, best))
+
+        # Phase 2: deduplicate — highest scoring first.
+        candidates.sort(key=lambda c: c[2][0].distance if c[2] else -1.0, reverse=True)
+
+        all_results: list[list[MatchResult]] = []
+        claimed_corners: list[np.ndarray] = []
+
+        for idx, card, best in candidates:
             if _is_claimed(card.corners, claimed_corners):
                 continue
-
-            # 0° orientation.
-            emb_0 = embedder.embed(card.image)
-            matches_0 = card_index.search(emb_0, top_k=top_n, threshold=threshold)
-
-            if matches_0 and matches_0[0].distance >= confident_threshold:
-                if debug:
-                    debug.save_match_summary(i, card.image, matches_0)
-                all_results.append(matches_0)
-                claimed_corners.append(card.corners)
-                continue
-
-            # 180° orientation.
-            rotated = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
-            emb_180 = embedder.embed(rotated)
-            matches_180 = card_index.search(emb_180, top_k=top_n, threshold=threshold)
-
-            # Keep the better orientation.
-            best = matches_0
-            if matches_180 and (not best or matches_180[0].distance > best[0].distance):
-                best = matches_180
-
             if debug:
-                debug.save_match_summary(i, card.image, best)
+                debug.save_match_summary(idx, card.image, best)
             all_results.append(best)
-
             if best and best[0].distance >= confident_threshold:
                 claimed_corners.append(card.corners)
     finally:

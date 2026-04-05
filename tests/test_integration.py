@@ -75,20 +75,18 @@ class TestSingleCardDetection:
         cards = detect_cards(np.asarray(image, dtype=np.uint8))
         assert len(cards) >= 1, f"Expected at least 1 card, got {len(cards)}"
 
-    @pytest.mark.xfail(reason="Low-contrast card border produces hash distances > 90")
     def test_moltres_151_identified(self) -> None:
         """Verify that Moltres from 151 set is correctly identified.
 
-        Currently expected to fail: perceptual hashing of a real photo
-        against small digital scans produces distances above any reasonable
-        threshold for this particular image (low contrast card border).
+        The hash backend cannot match this card (distance > 90), but the
+        fine-tuned CNN backend with center-crop exploration succeeds.
         """
         expected_id = get_card_id(SINGLE_TILTED_DIR, "moltres_151.png")
         assert expected_id is not None
         image_path = SINGLE_TILTED_DIR / "moltres_151.png"
         expected_ids = {expected_id}
 
-        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        results = identify_cards(image_path, backend="cnn", top_n=5)
         assert len(results) >= 1, "No cards detected"
 
         # Check that at least one detected card's top match is the expected card
@@ -288,20 +286,17 @@ class TestAxisAlignedSingleCards:
         [
             pytest.param(
                 "xerneas_12_25.png",
-                "Combined distance ~84, photo-vs-scan gap too large",
+                "Hash distance ~84 too large; CNN backend succeeds",
             ),
         ],
     )
-    @pytest.mark.xfail(
-        reason="Hash distance exceeds threshold for photo-vs-scan comparison"
-    )
-    def test_card_identified_xfail(self, image_name: str, reason: str) -> None:
-        """Cards that currently fail identification — documents known gaps."""
+    def test_card_identified_cnn_fallback(self, image_name: str, reason: str) -> None:
+        """Cards where hash matching fails but CNN backend succeeds."""
         expected_id = get_card_id(SINGLE_AXIS_ALIGNED_DIR, image_name)
         assert expected_id is not None, reason
 
         image_path = SINGLE_AXIS_ALIGNED_DIR / image_name
-        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        results = identify_cards(image_path, backend="cnn", top_n=5)
         assert len(results) >= 1, f"No cards detected in {image_name}"
 
         found_ids = _collect_match_ids(results)
@@ -513,20 +508,17 @@ class TestTiltedSingleCards:
         [
             pytest.param(
                 "moltres_151.png",
-                "Combined distance ~91, low-contrast border, wrong region",
+                "Hash distance ~91 too large; CNN backend succeeds",
             ),
         ],
     )
-    @pytest.mark.xfail(
-        reason="Hash distance exceeds threshold for photo-vs-scan comparison"
-    )
-    def test_card_identified_xfail(self, image_name: str, reason: str) -> None:
-        """Tilted cards that currently fail identification."""
+    def test_card_identified_cnn_fallback(self, image_name: str, reason: str) -> None:
+        """Tilted cards where hash matching fails but CNN succeeds."""
         expected_id = get_card_id(SINGLE_TILTED_DIR, image_name)
         assert expected_id is not None, reason
 
         image_path = SINGLE_TILTED_DIR / image_name
-        results = identify_cards(image_path, db_path=DB_PATH, top_n=5, threshold=60.0)
+        results = identify_cards(image_path, backend="cnn", top_n=5)
         assert len(results) >= 1, f"No cards detected in {image_name}"
 
         found_ids = _collect_match_ids(results)

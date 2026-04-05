@@ -80,6 +80,7 @@ disable = [
     "C0116", # missing-function-docstring
     "R0801", # duplicate-code (colour palettes shared across modules)
     "R0902", # too-many-instance-attributes
+    "R0912", # too-many-branches
     "R0913", # too-many-arguments
     "R0914", # too-many-locals
     "R0917", # too-many-positional-arguments
