@@ -45,6 +45,43 @@ def main(argv: list[str] | None = None) -> None:
         help="Save debug images to DIR (default: debug/)",
     )
 
+    # scan command
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Live screen-capture scanner with GUI",
+    )
+    scan_parser.add_argument(
+        "--db",
+        type=str,
+        default=None,
+        help="Path to hash database (default: data/card_hashes.db)",
+    )
+    scan_parser.add_argument(
+        "--monitor",
+        type=int,
+        default=1,
+        help="Monitor index to capture (default: 1 = primary)",
+    )
+    scan_parser.add_argument(
+        "--region",
+        type=str,
+        default=None,
+        metavar="X,Y,W,H",
+        help="Sub-region to capture as X,Y,WIDTH,HEIGHT",
+    )
+    scan_parser.add_argument(
+        "--top-n",
+        type=int,
+        default=5,
+        help="Number of match candidates per card (default: 5)",
+    )
+    scan_parser.add_argument(
+        "--threshold",
+        type=float,
+        default=40.0,
+        help="Max combined hash distance for a match (default: 40.0)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -53,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "identify":
         _cmd_identify(args)
+    elif args.command == "scan":
+        _cmd_scan(args)
 
 
 def _cmd_identify(args: argparse.Namespace) -> None:
@@ -96,3 +135,33 @@ def _cmd_identify(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _cmd_scan(args: argparse.Namespace) -> None:
+    # pylint: disable-next=import-outside-toplevel
+    from card_reco.scanner import Scanner
+
+    region: tuple[int, int, int, int] | None = None
+    if args.region is not None:
+        parts = args.region.split(",")
+        if len(parts) != 4:
+            print(
+                "Error: --region must be X,Y,WIDTH,HEIGHT (4 comma-separated ints)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            x, y, w, h = (int(p) for p in parts)
+        except ValueError:
+            print("Error: --region values must be integers", file=sys.stderr)
+            sys.exit(1)
+        region = (x, y, w, h)
+
+    scanner = Scanner(
+        db_path=args.db,
+        monitor=args.monitor,
+        region=region,
+        top_n=args.top_n,
+        threshold=args.threshold,
+    )
+    scanner.run()

@@ -89,6 +89,15 @@ class CardMatcher:
         # shape (N, 4, hash_bits) — 4 hash types per card, each as bit array
         self._hash_matrix: np.ndarray | None = None
 
+    def preload(self) -> None:
+        """Eagerly load the hash matrix from the database.
+
+        Call this from the same thread that created the matcher so that
+        subsequent :meth:`find_matches` calls from other threads only
+        access the in-memory NumPy matrix and never touch SQLite.
+        """
+        self._ensure_loaded()
+
     def close(self) -> None:
         self._db.close()
 

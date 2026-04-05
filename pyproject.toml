@@ -10,6 +10,7 @@ dependencies = [
     "imagehash>=4.3",
     "requests>=2.31",
     "tqdm>=4.66",
+    "mss>=9.0",
 ]
 
 [dependency-groups]
@@ -67,6 +68,7 @@ disable = [
     "C0114", # missing-module-docstring
     "C0115", # missing-class-docstring
     "C0116", # missing-function-docstring
+    "R0801", # duplicate-code (colour palettes shared across modules)
     "R0902", # too-many-instance-attributes
     "R0913", # too-many-arguments
     "R0914", # too-many-locals
