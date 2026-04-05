@@ -111,6 +111,89 @@ class TestCardMatcher:
                     assert results[1].rank == 2
                     assert results[0].distance <= results[1].distance
 
+    def test_name_group_separation_ignores_same_name_variants(self):
+        """Name-group separation treats same-name variants as one group.
+
+        Two Electivire variants (distances 0.22, 0.44) and one Pikachu
+        (distance 1.78).  Individual separation would fail because the
+        runner-up is the second Electivire variant (separation 0.22),
+        but name-group separation correctly compares Electivire vs
+        Pikachu (separation 1.56) and accepts.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "name_group.db"
+            base = "0" * 64
+            with HashDatabase(db_path) as db:
+                db.insert_card(
+                    card_id="sv10-69",
+                    name="Electivire ex",
+                    set_id="sv10",
+                    set_name="Destined Rivals",
+                    number="69",
+                    rarity="Rare",
+                    image_path="electivire1.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "1",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.insert_card(
+                    card_id="sv10-182",
+                    name="Electivire ex",
+                    set_id="sv10",
+                    set_name="Destined Rivals",
+                    number="182",
+                    rarity="Ultra Rare",
+                    image_path="electivire2.png",
+                    hashes=CardHashes(
+                        ahash=base[:-1] + "3",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.insert_card(
+                    card_id="base1-58",
+                    name="Pikachu",
+                    set_id="base1",
+                    set_name="Base",
+                    number="58",
+                    rarity="Common",
+                    image_path="pikachu.png",
+                    hashes=CardHashes(
+                        ahash=base[:-2] + "ff",
+                        phash=base,
+                        dhash=base,
+                        whash=base,
+                    ),
+                )
+                db.commit()
+
+            with CardMatcher(db_path) as matcher:
+                query = CardHashes(
+                    ahash="0" * 64,
+                    phash="0" * 64,
+                    dhash="0" * 64,
+                    whash="0" * 64,
+                )
+                # Name-group separation succeeds: Electivire group at
+                # ~0.22 vs Pikachu group at ~1.78, separation ~1.56.
+                results = matcher.find_matches(
+                    query,
+                    top_n=5,
+                    threshold=0.0,
+                    enable_relaxed_fallback=True,
+                    relaxed_headroom=5.0,
+                    min_separation=1.0,
+                    min_consensus=99,  # disable consensus
+                )
+                assert len(results) == 2
+                assert results[0].card.name == "Electivire ex"
+                assert results[1].card.name == "Electivire ex"
+                assert results[0].distance <= results[1].distance
+
     def test_relaxed_fallback_returns_clear_best(self):
         """Fallback can return one clear winner above a strict threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -286,6 +369,8 @@ class TestCardMatcher:
                 assert strict == []
 
                 # Consensus fallback should find 2 Wigglytuffs and accept.
+                # Two-stage matching returns all variants of the winning
+                # name within headroom.
                 results = matcher.find_matches(
                     query,
                     top_n=5,
@@ -295,8 +380,10 @@ class TestCardMatcher:
                     min_separation=50.0,  # impossibly high — blocks separation
                     min_consensus=2,
                 )
-                assert len(results) == 1
+                assert len(results) == 2
                 assert results[0].card.name == "Wigglytuff"
+                assert results[1].card.name == "Wigglytuff"
+                assert results[0].distance <= results[1].distance
 
     def test_consensus_fallback_requires_min_count(self):
         """Consensus should not trigger if only one card of that name exists."""

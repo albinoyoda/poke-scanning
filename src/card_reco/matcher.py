@@ -71,6 +71,80 @@ class CardMatcher:
         self._hash_matrix = matrix
         return self._cards, self._hash_matrix
 
+    def _name_group_fallback(
+        self,
+        cards: list[CardRecord],
+        combined: np.ndarray,
+        headroom_limit: float,
+        min_consensus: int,
+        min_separation: float,
+    ) -> np.ndarray:
+        """Name-group two-stage fallback for relaxed matching.
+
+        Groups all cards by name, selects the name whose best variant
+        is closest, then accepts via consensus or separation.  Returns
+        indices of the winning name's variants within headroom, or an
+        empty array when no name qualifies.
+        """
+        # Per-name summary: (best_distance, best_index, n_within_headroom).
+        name_groups: dict[str, tuple[float, int, int]] = {}
+        for k, card in enumerate(cards):
+            dist_k = float(combined[k])
+            name = card.name
+            if name in name_groups:
+                prev_best, prev_idx, prev_count = name_groups[name]
+                new_count = prev_count + (1 if dist_k <= headroom_limit else 0)
+                if dist_k < prev_best:
+                    name_groups[name] = (dist_k, k, new_count)
+                else:
+                    name_groups[name] = (prev_best, prev_idx, new_count)
+            else:
+                name_groups[name] = (
+                    dist_k,
+                    k,
+                    1 if dist_k <= headroom_limit else 0,
+                )
+
+        # Rank name groups by their best variant's distance.
+        ranked_names = sorted(name_groups, key=lambda n: name_groups[n][0])
+        if not ranked_names:
+            return np.empty(0, dtype=np.int64)
+
+        best_name = ranked_names[0]
+        best_dist, _, n_close = name_groups[best_name]
+
+        if best_dist > headroom_limit:
+            return np.empty(0, dtype=np.int64)
+
+        accept = False
+
+        # Strategy 1: name consensus — multiple variants of the
+        # same card cluster within headroom.
+        if n_close >= min_consensus:
+            accept = True
+
+        # Strategy 2: name-group separation — the winning name's
+        # best variant is well separated from the best variant of
+        # any other name.
+        if not accept and len(ranked_names) > 1:
+            second_dist = name_groups[ranked_names[1]][0]
+            if (second_dist - best_dist) >= min_separation:
+                accept = True
+
+        if not accept:
+            return np.empty(0, dtype=np.int64)
+
+        # Return all variants of the winning name within headroom
+        # (stage-2 variant refinement).
+        return np.array(
+            [
+                k
+                for k, card in enumerate(cards)
+                if card.name == best_name and float(combined[k]) <= headroom_limit
+            ],
+            dtype=np.int64,
+        )
+
     def find_matches(
         self,
         hashes: CardHashes,
@@ -88,17 +162,24 @@ class CardMatcher:
         below threshold.
 
         When *enable_relaxed_fallback* is true and no match passes
-        *threshold*, a single fallback match may still be returned via
-        one of two strategies:
+        *threshold*, a **name-group two-stage** fallback is attempted:
 
-        1. **Separation** — the best candidate distance is within
-           *relaxed_headroom* of *threshold* and the runner-up is at
-           least *min_separation* worse.
-        2. **Name consensus** — at least *min_consensus* reference cards
-           sharing the same name appear among the top candidates within
-           headroom.  Multiple variants of the same card clustering at
-           the top is a strong identification signal even when their
-           inter-variant separation is small.
+        *Stage 1 — identify by name*: reference cards are grouped by
+        name and the group whose best variant has the lowest distance
+        is selected.
+
+        *Stage 2 — accept & refine*: the winning group is accepted
+        when at least one of two criteria is met:
+
+        1. **Name consensus** — the group has at least *min_consensus*
+           variants within *relaxed_headroom* of *threshold*.
+        2. **Name-group separation** — the group's best variant is at
+           least *min_separation* lower than the best variant of any
+           other name group.
+
+        When accepted, all variants of the winning name within
+        headroom are returned (up to *top_n*), enabling the caller
+        to see the variant landscape.
         """
         cards, matrix = self._ensure_loaded()
         if not cards:
@@ -123,38 +204,15 @@ class CardMatcher:
         mask = combined <= threshold
         indices = np.flatnonzero(mask)
 
-        # Optional fallback for hard photos where the true card is a clear
-        # winner but still sits above the strict absolute threshold.
+        # Relaxed fallback via name-group two-stage matching.
         if len(indices) == 0 and enable_relaxed_fallback and len(combined) > 0:
-            order_all = np.argsort(combined)
-            best_idx = int(order_all[0])
-            best_dist = float(combined[best_idx])
-
-            if best_dist <= threshold + relaxed_headroom:
-                second_dist = (
-                    float(combined[int(order_all[1])])
-                    if len(order_all) > 1
-                    else float("inf")
-                )
-
-                # Strategy 1: clear separation from runner-up.
-                if (second_dist - best_dist) >= min_separation:
-                    indices = np.array([best_idx], dtype=np.int64)
-
-                # Strategy 2: name consensus — multiple reference cards
-                # with the same name cluster at the top.
-                elif 2 <= min_consensus <= len(order_all):
-                    best_name = cards[best_idx].name
-                    consensus_top = min(5, len(order_all))
-                    same_name_count = sum(
-                        1
-                        for k in range(consensus_top)
-                        if cards[int(order_all[k])].name == best_name
-                        and float(combined[int(order_all[k])])
-                        <= threshold + relaxed_headroom
-                    )
-                    if same_name_count >= min_consensus:
-                        indices = np.array([best_idx], dtype=np.int64)
+            indices = self._name_group_fallback(
+                cards,
+                combined,
+                headroom_limit=threshold + relaxed_headroom,
+                min_consensus=min_consensus,
+                min_separation=min_separation,
+            )
 
         if len(indices) == 0:
             return []
