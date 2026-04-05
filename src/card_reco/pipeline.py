@@ -149,6 +149,7 @@ def identify_cards_from_array(
     threshold: float = 40.0,
     confident_threshold: float = 25.0,
     debug: DebugWriter | None = None,
+    matcher: CardMatcher | None = None,
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards from a BGR numpy array.
 
@@ -161,6 +162,10 @@ def identify_cards_from_array(
     also hashed directly (without detection) so that pre-cropped card
     photos can be identified even when the detector re-warps them
     poorly.
+
+    When *matcher* is provided it is used directly (and **not** closed
+    by this function).  This allows callers that process many images to
+    amortise the one-time database-load cost.
     """
     detected = detect_cards(image, debug=debug)
 
@@ -176,67 +181,97 @@ def identify_cards_from_array(
 
     all_results: list[list[MatchResult]] = []
 
-    with CardMatcher(db_path) as matcher:
-        for i, card in enumerate(detected):
-            enable_relaxed_fallback = (
-                card.confidence >= _RELAXED_FALLBACK_MIN_CONFIDENCE
-            )
+    # Use the caller-supplied matcher or create (and close) a fresh one.
+    owns_matcher = matcher is None
+    if matcher is None:
+        matcher = CardMatcher(db_path)
 
-            # Try the card as-is first (0° orientation).
-            hashes = compute_hashes(card.image)
-            best_matches = matcher.find_matches(
-                hashes,
-                top_n=top_n,
-                threshold=threshold,
-                enable_relaxed_fallback=enable_relaxed_fallback,
-                relaxed_headroom=_RELAXED_FALLBACK_HEADROOM,
-                min_separation=_RELAXED_FALLBACK_SEPARATION,
-                min_consensus=_RELAXED_FALLBACK_MIN_CONSENSUS,
-            )
+    try:
+        _run_matching(
+            matcher,
+            detected,
+            image,
+            all_results,
+            top_n=top_n,
+            threshold=threshold,
+            confident_threshold=confident_threshold,
+            debug=debug,
+        )
+    finally:
+        if owns_matcher:
+            matcher.close()
 
-            # Skip 180° flip when the first orientation is already confident.
-            if best_matches and best_matches[0].distance < confident_threshold:
-                if debug:
-                    debug.save_match_summary(i, card.image, best_matches)
-                all_results.append(best_matches)
-                continue
+    return all_results
 
-            # Try 180° rotation and keep whichever orientation matched better.
-            rotated = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
-            hashes_180 = compute_hashes(rotated)
-            matches_180 = matcher.find_matches(
-                hashes_180,
-                top_n=top_n,
-                threshold=threshold,
-                enable_relaxed_fallback=enable_relaxed_fallback,
-                relaxed_headroom=_RELAXED_FALLBACK_HEADROOM,
-                min_separation=_RELAXED_FALLBACK_SEPARATION,
-                min_consensus=_RELAXED_FALLBACK_MIN_CONSENSUS,
-            )
-            if matches_180 and (
-                not best_matches or matches_180[0].distance < best_matches[0].distance
-            ):
-                best_matches = matches_180
 
-            # Crop exploration: when the basic match is still not
-            # confident, try denoised/CLAHE-enhanced variants and
-            # alternative crop paddings.
-            if not best_matches or best_matches[0].distance > threshold:
-                best_matches = _explore_crops(
-                    image,
-                    card,
-                    matcher,
-                    best_matches,
-                    top_n=top_n,
-                    threshold=threshold,
-                    enable_relaxed_fallback=enable_relaxed_fallback,
-                )
+def _run_matching(
+    matcher: CardMatcher,
+    detected: list[DetectedCard],
+    image: np.ndarray,
+    all_results: list[list[MatchResult]],
+    *,
+    top_n: int,
+    threshold: float,
+    confident_threshold: float,
+    debug: DebugWriter | None,
+) -> None:
+    """Match each detected card using *matcher* (extraction of inner loop)."""
+    for i, card in enumerate(detected):
+        enable_relaxed_fallback = card.confidence >= _RELAXED_FALLBACK_MIN_CONFIDENCE
 
+        # Try the card as-is first (0° orientation).
+        hashes = compute_hashes(card.image)
+        best_matches = matcher.find_matches(
+            hashes,
+            top_n=top_n,
+            threshold=threshold,
+            enable_relaxed_fallback=enable_relaxed_fallback,
+            relaxed_headroom=_RELAXED_FALLBACK_HEADROOM,
+            min_separation=_RELAXED_FALLBACK_SEPARATION,
+            min_consensus=_RELAXED_FALLBACK_MIN_CONSENSUS,
+        )
+
+        # Skip 180° flip when the first orientation is already confident.
+        if best_matches and best_matches[0].distance < confident_threshold:
             if debug:
                 debug.save_match_summary(i, card.image, best_matches)
             all_results.append(best_matches)
+            continue
 
-    return all_results
+        # Try 180° rotation and keep whichever orientation matched better.
+        rotated = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
+        hashes_180 = compute_hashes(rotated)
+        matches_180 = matcher.find_matches(
+            hashes_180,
+            top_n=top_n,
+            threshold=threshold,
+            enable_relaxed_fallback=enable_relaxed_fallback,
+            relaxed_headroom=_RELAXED_FALLBACK_HEADROOM,
+            min_separation=_RELAXED_FALLBACK_SEPARATION,
+            min_consensus=_RELAXED_FALLBACK_MIN_CONSENSUS,
+        )
+        if matches_180 and (
+            not best_matches or matches_180[0].distance < best_matches[0].distance
+        ):
+            best_matches = matches_180
+
+        # Crop exploration: when the basic match is still not
+        # confident, try denoised/CLAHE-enhanced variants and
+        # alternative crop paddings.
+        if not best_matches or best_matches[0].distance > threshold:
+            best_matches = _explore_crops(
+                image,
+                card,
+                matcher,
+                best_matches,
+                top_n=top_n,
+                threshold=threshold,
+                enable_relaxed_fallback=enable_relaxed_fallback,
+            )
+
+        if debug:
+            debug.save_match_summary(i, card.image, best_matches)
+        all_results.append(best_matches)
 
 
 def _explore_crops(
