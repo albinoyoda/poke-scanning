@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from card_reco.detector import detect_cards
+from card_reco.detector.corners import order_corners
 
 TEST_DATA_DIR = Path("data") / "tests" / "single_cards" / "axis_aligned"
 
@@ -55,24 +56,12 @@ def _extract_green_corners(edges_image: np.ndarray) -> np.ndarray:
         approx = cv2.approxPolyDP(largest, eps_factor * peri, True)
         if len(approx) == 4:
             pts = approx.reshape(4, 2).astype(np.float32)
-            return _order_corners(pts)
+            return order_corners(pts)
 
     # Fallback: use minAreaRect
     rect = cv2.minAreaRect(largest)
     box = cv2.boxPoints(rect).astype(np.float32)
-    return _order_corners(box)
-
-
-def _order_corners(pts: np.ndarray) -> np.ndarray:
-    """Order four points as: top-left, top-right, bottom-right, bottom-left."""
-    rect = np.zeros((4, 2), dtype=np.float32)
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    d = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(d)]
-    rect[3] = pts[np.argmax(d)]
-    return rect
+    return order_corners(box)
 
 
 def _avg_corner_distance(detected: np.ndarray, expected: np.ndarray) -> float:

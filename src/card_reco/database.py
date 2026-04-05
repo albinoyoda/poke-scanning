@@ -26,6 +26,27 @@ CREATE INDEX IF NOT EXISTS idx_cards_set_id ON cards(set_id);
 CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
 """
 
+_CARD_COLUMNS = (
+    "id, name, set_id, set_name, number, rarity, image_path, ahash, phash, dhash, whash"
+)
+
+
+def _row_to_card(row: sqlite3.Row) -> CardRecord:
+    """Convert a SQLite Row to a CardRecord."""
+    return CardRecord(
+        id=row["id"],
+        name=row["name"],
+        set_id=row["set_id"],
+        set_name=row["set_name"],
+        number=row["number"],
+        rarity=row["rarity"],
+        image_path=row["image_path"],
+        ahash=row["ahash"],
+        phash=row["phash"],
+        dhash=row["dhash"],
+        whash=row["whash"],
+    )
+
 
 class HashDatabase:
     """SQLite-backed database of reference card hashes."""
@@ -87,45 +108,19 @@ class HashDatabase:
         return int(row[0])
 
     def get_all_cards(self) -> list[CardRecord]:
-        rows = self._conn.execute(
-            "SELECT id, name, set_id, set_name, number, rarity, "
-            "image_path, ahash, phash, dhash, whash FROM cards"
-        ).fetchall()
-        return [
-            CardRecord(
-                id=r["id"],
-                name=r["name"],
-                set_id=r["set_id"],
-                set_name=r["set_name"],
-                number=r["number"],
-                rarity=r["rarity"],
-                image_path=r["image_path"],
-                ahash=r["ahash"],
-                phash=r["phash"],
-                dhash=r["dhash"],
-                whash=r["whash"],
-            )
-            for r in rows
-        ]
+        rows = self._conn.execute(f"SELECT {_CARD_COLUMNS} FROM cards").fetchall()
+        return [_row_to_card(r) for r in rows]
+
+    def get_all_ids(self) -> set[str]:
+        """Return the set of all card IDs in the database."""
+        rows = self._conn.execute("SELECT id FROM cards").fetchall()
+        return {r["id"] for r in rows}
 
     def get_card_by_id(self, card_id: str) -> CardRecord | None:
         row = self._conn.execute(
-            "SELECT id, name, set_id, set_name, number, rarity, "
-            "image_path, ahash, phash, dhash, whash FROM cards WHERE id = ?",
+            f"SELECT {_CARD_COLUMNS} FROM cards WHERE id = ?",
             (card_id,),
         ).fetchone()
         if row is None:
             return None
-        return CardRecord(
-            id=row["id"],
-            name=row["name"],
-            set_id=row["set_id"],
-            set_name=row["set_name"],
-            number=row["number"],
-            rarity=row["rarity"],
-            image_path=row["image_path"],
-            ahash=row["ahash"],
-            phash=row["phash"],
-            dhash=row["dhash"],
-            whash=row["whash"],
-        )
+        return _row_to_card(row)

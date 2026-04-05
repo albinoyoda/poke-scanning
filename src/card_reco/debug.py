@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
+
+if TYPE_CHECKING:
+    from card_reco.models import DetectedCard, MatchResult
 
 
 class DebugWriter:
@@ -72,7 +76,7 @@ class DebugWriter:
     def save_candidates(
         self,
         image: np.ndarray,
-        contours: list,
+        contours: list[np.ndarray],
         min_area: float,
     ) -> None:
         """Draw all candidate contours on the original image."""
@@ -149,7 +153,7 @@ class DebugWriter:
         self,
         image: np.ndarray,
         before_count: int,
-        after_detections: list,
+        after_detections: list[DetectedCard],
     ) -> None:
         """Annotate NMS survivors on the original image."""
         vis = image.copy()
@@ -204,7 +208,7 @@ class DebugWriter:
         self,
         index: int,
         card_image: np.ndarray,
-        matches: list,
+        matches: list[MatchResult],
     ) -> None:
         """Save warped card side-by-side with a text summary of matches."""
         # Build a canvas: card on left, text on right

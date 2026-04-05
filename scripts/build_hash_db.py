@@ -1,7 +1,7 @@
 """Build the perceptual hash database from downloaded reference card images.
 
 Usage:
-    python scripts/build_hash_db.py [--data-dir DATA_DIR] [--db-path DB_PATH]
+    uv run python scripts/build_hash_db.py [--data-dir DATA_DIR] [--db-path DB_PATH]
 
 Reads card metadata + images from the data directory, computes perceptual hashes,
 and stores them in a SQLite database. Resumable — skips cards already in the DB.
@@ -17,9 +17,6 @@ from pathlib import Path
 
 from PIL import Image
 from tqdm import tqdm
-
-# Add src to path so we can import card_reco
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from card_reco.database import HashDatabase
 from card_reco.hasher import compute_hashes_pil
@@ -102,7 +99,7 @@ def main() -> None:
         # Get existing IDs to skip
         existing_ids: set[str] = set()
         if not args.rebuild and existing_count > 0:
-            existing_ids = {c.id for c in db.get_all_cards()}
+            existing_ids = db.get_all_ids()
 
         total_processed = 0
         total_skipped = 0

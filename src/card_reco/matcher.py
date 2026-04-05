@@ -24,6 +24,57 @@ _TOTAL_WEIGHT = float(_WEIGHTS_ARRAY.sum())
 DEFAULT_THRESHOLD = 40.0
 
 
+def _build_name_groups(
+    cards: list[CardRecord],
+    combined: np.ndarray,
+    headroom_limit: float,
+) -> dict[str, tuple[float, int, int]]:
+    """Build per-name summary.
+
+    Returns ``{name: (best_distance, best_index, n_within_headroom)}``.
+    """
+    name_groups: dict[str, tuple[float, int, int]] = {}
+    for k, card in enumerate(cards):
+        dist_k = float(combined[k])
+        name = card.name
+        if name in name_groups:
+            prev_best, prev_idx, prev_count = name_groups[name]
+            new_count = prev_count + (1 if dist_k <= headroom_limit else 0)
+            if dist_k < prev_best:
+                name_groups[name] = (dist_k, k, new_count)
+            else:
+                name_groups[name] = (prev_best, prev_idx, new_count)
+        else:
+            name_groups[name] = (
+                dist_k,
+                k,
+                1 if dist_k <= headroom_limit else 0,
+            )
+    return name_groups
+
+
+def _accept_by_consensus_or_separation(
+    n_close: int,
+    min_consensus: int,
+    best_dist: float,
+    second_best_dist: float | None,
+    min_separation: float,
+) -> bool:
+    """Decide whether to accept the winning name group.
+
+    Returns ``True`` when either:
+    - **Consensus**: at least *min_consensus* variants cluster within headroom.
+    - **Separation**: the best variant is at least *min_separation* better
+      than the runner-up name group's best variant.
+    """
+    if n_close >= min_consensus:
+        return True
+    return (
+        second_best_dist is not None
+        and (second_best_dist - best_dist) >= min_separation
+    )
+
+
 class CardMatcher:
     """Matches input card hashes against reference database.
 
@@ -86,24 +137,7 @@ class CardMatcher:
         indices of the winning name's variants within headroom, or an
         empty array when no name qualifies.
         """
-        # Per-name summary: (best_distance, best_index, n_within_headroom).
-        name_groups: dict[str, tuple[float, int, int]] = {}
-        for k, card in enumerate(cards):
-            dist_k = float(combined[k])
-            name = card.name
-            if name in name_groups:
-                prev_best, prev_idx, prev_count = name_groups[name]
-                new_count = prev_count + (1 if dist_k <= headroom_limit else 0)
-                if dist_k < prev_best:
-                    name_groups[name] = (dist_k, k, new_count)
-                else:
-                    name_groups[name] = (prev_best, prev_idx, new_count)
-            else:
-                name_groups[name] = (
-                    dist_k,
-                    k,
-                    1 if dist_k <= headroom_limit else 0,
-                )
+        name_groups = _build_name_groups(cards, combined, headroom_limit)
 
         # Rank name groups by their best variant's distance.
         ranked_names = sorted(name_groups, key=lambda n: name_groups[n][0])
@@ -116,22 +150,12 @@ class CardMatcher:
         if best_dist > headroom_limit:
             return np.empty(0, dtype=np.int64)
 
-        accept = False
-
-        # Strategy 1: name consensus — multiple variants of the
-        # same card cluster within headroom.
-        if n_close >= min_consensus:
-            accept = True
-
-        # Strategy 2: name-group separation — the winning name's
-        # best variant is well separated from the best variant of
-        # any other name.
-        if not accept and len(ranked_names) > 1:
-            second_dist = name_groups[ranked_names[1]][0]
-            if (second_dist - best_dist) >= min_separation:
-                accept = True
-
-        if not accept:
+        second_best_dist = (
+            name_groups[ranked_names[1]][0] if len(ranked_names) > 1 else None
+        )
+        if not _accept_by_consensus_or_separation(
+            n_close, min_consensus, best_dist, second_best_dist, min_separation
+        ):
             return np.empty(0, dtype=np.int64)
 
         # Return all variants of the winning name within headroom
