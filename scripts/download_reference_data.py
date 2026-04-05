@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 
 import requests
 from tqdm import tqdm
@@ -77,8 +78,13 @@ def download_cards_for_set(set_id: str, data_dir: Path) -> list[dict]:
 
 def download_card_image(
     card: dict, data_dir: Path, use_small: bool = False
-) -> Path | None:
-    """Download a single card image. Returns the local path or None on failure."""
+) -> tuple[Path, Literal["downloaded", "skipped"]] | None:
+    """Download a single card image.
+
+    Returns a (path, status) tuple where status is 'downloaded' for a fresh
+    download or 'skipped' when the file already existed.  Returns None on
+    failure (missing URL or network error).
+    """
     images = card.get("images", {})
     url = images.get("small" if use_small else "large") or images.get("small")
     if not url:
@@ -94,14 +100,15 @@ def download_card_image(
     img_path = img_dir / f"{safe_card_id}{ext}"
 
     if img_path.exists() and img_path.stat().st_size > 0:
-        return img_path
+        return img_path, "skipped"
 
     try:
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         with open(img_path, "wb") as f:
             f.write(resp.content)
-        return img_path
+        time.sleep(DOWNLOAD_DELAY)  # only throttle actual HTTP requests
+        return img_path, "downloaded"
     except requests.RequestException as e:
         print(f"  Warning: Failed to download {card_id}: {e}", file=sys.stderr)
         return None
@@ -138,8 +145,9 @@ def main() -> None:
     if args.sets:
         set_ids = [sid for sid in args.sets if sid in set_ids]
         if not set_ids:
+            available = [s["id"] for s in sets_data[:10]]
             print(
-                f"Error: None of the specified sets found. Available: {[s['id'] for s in sets_data[:10]]}...",
+                f"Error: None of the specified sets found. Available: {available}...",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -173,13 +181,15 @@ def main() -> None:
         result = download_card_image(card, data_dir, use_small=args.small)
         if result is None:
             failed += 1
-        elif result.stat().st_size > 0:
-            downloaded += 1
-        else:
+        elif result[1] == "skipped":
             skipped += 1
-        time.sleep(DOWNLOAD_DELAY)
+        else:
+            downloaded += 1
 
-    print(f"\nDone! Downloaded: {downloaded}, Skipped: {skipped}, Failed: {failed}")
+    print(
+        f"\nDone! Downloaded: {downloaded}, "
+        f"Skipped (already existed): {skipped}, Failed: {failed}"
+    )
     print(f"Data directory: {data_dir.resolve()}")
 
 

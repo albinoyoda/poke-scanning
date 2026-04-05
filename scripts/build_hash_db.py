@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -32,10 +33,12 @@ def find_card_image(card: dict, data_dir: Path) -> Path | None:
     card_id = card["id"]
     set_id = card.get("set", {}).get("id", card_id.split("-")[0])
     images_dir = data_dir / "images" / set_id
+    # Apply the same sanitization used by download_reference_data.py
+    safe_card_id = re.sub(r'[<>:"/\\|?*]', "_", card_id)
 
     # Try common extensions
     for ext in (".png", ".jpg", ".jpeg", ".webp"):
-        path = images_dir / f"{card_id}{ext}"
+        path = images_dir / f"{safe_card_id}{ext}"
         if path.exists() and path.stat().st_size > 0:
             return path
 
@@ -104,6 +107,7 @@ def main() -> None:
         total_processed = 0
         total_skipped = 0
         total_failed = 0
+        failed_sets: dict[str, int] = {}
 
         for card_file in card_files:
             with open(card_file, encoding="utf-8") as f:
@@ -112,6 +116,7 @@ def main() -> None:
             set_id = card_file.stem
             set_info = sets_by_id.get(set_id, {})
             set_name = set_info.get("name", set_id)
+            set_failed = 0
 
             for card in tqdm(cards, desc=f"Hashing {set_id}", leave=False):
                 card_id = card["id"]
@@ -123,6 +128,7 @@ def main() -> None:
                 img_path = find_card_image(card, data_dir)
                 if img_path is None:
                     total_failed += 1
+                    set_failed += 1
                     continue
 
                 try:
@@ -146,17 +152,33 @@ def main() -> None:
                         db.commit()
 
                 except Exception as e:
-                    print(f"  Warning: Failed to hash {card_id}: {e}", file=sys.stderr)
+                    print(
+                        f"  Warning: Failed to hash {card_id}: {e}",
+                        file=sys.stderr,
+                    )
                     total_failed += 1
+                    set_failed += 1
+
+            if set_failed > 0:
+                failed_sets[set_id] = set_failed
 
             db.commit()
 
-        print(f"\nDone!")
+        print("\nDone!")
         print(f"  Processed: {total_processed}")
         print(f"  Skipped (already in DB): {total_skipped}")
         print(f"  Failed: {total_failed}")
         print(f"  Total in DB: {db.count()}")
         print(f"  Database: {db_path.resolve()}")
+
+        if failed_sets:
+            print(f"\n  Sets with missing images ({len(failed_sets)} sets):")
+            for sid, count in sorted(failed_sets.items(), key=lambda x: -x[1]):
+                print(f"    {sid}: {count} cards")
+            print(
+                "\n  Hint: run scripts/download_reference_data.py"
+                " to download missing images."
+            )
 
 
 if __name__ == "__main__":
