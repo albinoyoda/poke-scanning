@@ -25,15 +25,32 @@ distance against a SQLite reference database.
 
 ```
 Image → detect_cards() → [DetectedCard, …]
-  └→ for each detection:
-       embedder.embed(0°) → float32[576] → index.search()
-       if similarity ≥ 0.70: done (claim region)
-       else: embedder.embed(180°) → index.search() → keep best
+  +-> for each detection (Phase 1 - scoring):
+       for variant in [full_frame, center_crop(85%)]:
+         for orientation in [0 deg, 180 deg]:
+           embedder.embed(variant) -> float32[576] -> index.search()
+           keep highest cosine similarity across all 4 attempts
+  +-> Phase 2 - deduplication:
+       sort detections by best score (descending)
+       emit results, skipping overlapping regions (IoU > 0.5)
 ```
 
-Uses MobileNetV3-Small (ONNX Runtime) to produce 576-dim L2-normalised
-embeddings, matched by cosine similarity via a FAISS `IndexFlatIP` index.
-Simpler pipeline: no crop exploration, no name-group fallback.
+Uses a **fine-tuned MobileNetV3-Small** (ONNX Runtime) to produce 576-dim
+L2-normalised embeddings, matched by cosine similarity via a FAISS
+`IndexFlatIP` index over 20,149 reference cards.
+
+The model was fine-tuned on all reference card images using NT-Xent
+(InfoNCE) contrastive learning.  Center-crop exploration (85% of the
+warped card) strips border artifacts from perspective transforms and
+graded card slabs, significantly improving similarity scores for
+challenging images.  Best-first deduplication ensures overlapping
+detections of the same physical card keep the highest-scoring match
+rather than the first one encountered.
+
+**Accuracy:** 100% top-5 identification across all test images (single
+cards, rotated, tilted, graded, multi-card grids).  Surpasses the hash
+backend on difficult cases (low-contrast borders, 151-set illustration
+style, graded slabs).
 
 ## Module Map
 
@@ -78,6 +95,49 @@ Landscape-oriented cards (width > 1.2× height) are warped to landscape first,
 then rotated to portrait. Non-max suppression (IoU > 0.5) removes
 overlapping detections.
 
+## CNN Embedding (`embedder.py`, `faiss_index.py`)
+
+### Model
+
+MobileNetV3-Small backbone producing 576-dimensional L2-normalised
+embeddings.  The model was fine-tuned from ImageNet-1k pretrained weights
+using contrastive learning (`scripts/finetune_model.py`):
+
+| Parameter | Value |
+|---|---|
+| Architecture | MobileNetV3-Small (backbone only, no classifier) |
+| Embedding dim | 576 (global average pool output) |
+| Loss | NT-Xent (InfoNCE), temperature 0.07 |
+| Training | SimCLR-style: two augmented views per card, all other cards as negatives |
+| Augmentation | RandomResizedCrop(224), rotation +/-15 deg, perspective 0.15, colour jitter, Gaussian blur, random erasing |
+| Schedule | 2 warmup epochs (backbone frozen) + 10 full fine-tuning epochs |
+| Optimiser | AdamW (backbone lr=1e-4, projector lr=1e-3), cosine annealing |
+| Reference images | 20,149 cards across 168 sets |
+| Training loss | 0.596 -> 0.009 over 12 epochs |
+| ONNX model size | ~4 MB (model + external data) |
+| Inference | ONNX Runtime, ~2 ms per card on CPU |
+
+A projection head (576 -> 576 -> 128, ReLU) is used during training for
+the contrastive objective, then discarded at ONNX export time.
+
+### Index
+
+FAISS `IndexFlatIP` (inner product = cosine similarity for L2-normalised
+vectors).  Exact brute-force search over 20,149 reference embeddings.
+
+| File | Content |
+|---|---|
+| `card_embeddings.faiss` | FAISS index (20,149 x 576 float32) |
+| `card_embeddings_meta.json` | Ordered card ID list + metadata sidecar |
+
+### CNN Pipeline Thresholds
+
+| Threshold | Value | Meaning |
+|---|---|---|
+| `_CNN_CONFIDENT_THRESHOLD` | 0.70 | Skip further orientations/crops |
+| `_CNN_MATCH_THRESHOLD` | 0.40 | Minimum similarity to include in results |
+| `_CNN_CENTER_CROP` | 0.85 | Center crop fraction for border removal |
+
 ## Hashing (`hasher.py`)
 
 Each detected card image is converted to a PIL Image and hashed three ways
@@ -119,9 +179,10 @@ Built by `scripts/build_hash_db.py` from card images in
 ```
 data/
 ├── card_hashes.db              # Reference hash database (hash backend)
-├── mobilenet_v3_small.onnx     # CNN model (CNN backend, 0.3 MB)
-├── card_embeddings.faiss       # FAISS embedding index (CNN backend)
+├── card_embeddings.faiss       # FAISS embedding index (20,149 × 576)
 ├── card_embeddings_meta.json   # Card metadata sidecar for FAISS index
+├── mobilenet_v3_small.onnx     # Fine-tuned CNN model (CNN backend)
+├── mobilenet_v3_small.onnx.data# ONNX external data (model weights, ~3.7 MB)
 ├── metadata/
 │   ├── sets.json               # Set index (from PokemonTCG/pokemon-tcg-data)
 │   └── cards/{set_id}.json     # Per-set card metadata
@@ -144,7 +205,8 @@ Each test subfolder contains `_annotations.json` with expected card IDs.
 |---|---|
 | `download_reference_data.py` | Download card metadata + images from PokemonTCG GitHub |
 | `build_hash_db.py` | Build/rebuild the SQLite hash database from local images |
-| `export_model.py` | Export MobileNetV3-Small to ONNX (requires torch, one-time) |
+| `export_model.py` | Export pretrained MobileNetV3-Small to ONNX (one-time) |
+| `finetune_model.py` | Fine-tune MobileNetV3-Small with contrastive learning |
 | `build_embedding_db.py` | Build FAISS embedding index from reference card images |
 | `find_cards.py` | Quick CLI card finder |
 | `find_sets.py` | Search available sets |
@@ -163,6 +225,7 @@ Each test subfolder contains `_annotations.json` with expected card IDs.
 | Vector search | FAISS-cpu (≥ 1.7) |
 | Reference DB | SQLite 3 (stdlib) |
 | Data download | requests, tqdm |
+| CNN fine-tuning | PyTorch + torchvision (dev only, for `finetune_model.py`) |
 | Linting | ruff (lint + format), pylint (score 10.00 required) |
 | Type checking | ty |
 | Testing | pytest |
@@ -219,10 +282,11 @@ DCT/wavelet transforms in pure Python/NumPy.
    is lower discrimination between visually similar cards.
 
 5. **~~CNN embeddings~~** — Implemented as the `cnn` backend. Uses
-   MobileNetV3-Small (pretrained on ImageNet) with ONNX Runtime and FAISS.
-   Currently 55% top-1 accuracy (vs ~85% for hash backend) due to generic
-   pretrained features. Fine-tuning on Pokemon card data would improve this
-   significantly.
+   MobileNetV3-Small fine-tuned with NT-Xent contrastive learning on all
+   20,149 reference cards. Achieves 100% top-5 identification on all test
+   images, surpassing the hash backend on difficult cases. Center-crop
+   exploration and best-first deduplication handle border artifacts and
+   overlapping detections.
 
 ### Estimated Impact of Further Improvements
 

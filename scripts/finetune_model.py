@@ -15,7 +15,6 @@ Requires dev dependencies: torch, torchvision.
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import re
 import sys
@@ -25,8 +24,8 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from PIL import Image
+from torch.nn import functional as func
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
@@ -107,7 +106,7 @@ class CardPairDataset(Dataset):
                 img = Image.open(p).convert("RGB")
                 img = img.resize((self.CACHE_SIZE, self.CACHE_SIZE), Image.BILINEAR)
                 self.images.append(np.asarray(img, dtype=np.uint8))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 failed += 1
             if (i + 1) % 5000 == 0:
                 print(f"    {i + 1}/{len(image_paths)} loaded")
@@ -192,7 +191,7 @@ def nt_xent_loss(
             torch.arange(0, batch_size, device=z.device),
         ]
     )
-    return F.cross_entropy(sim, labels)
+    return func.cross_entropy(sim, labels)
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +255,8 @@ def train(
             p.requires_grad = not freeze_backbone
 
         for batch_idx, (view1, view2) in enumerate(loader):
-            z1 = F.normalize(model(view1), dim=1)
-            z2 = F.normalize(model(view2), dim=1)
+            z1 = func.normalize(model(view1), dim=1)
+            z2 = func.normalize(model(view2), dim=1)
             loss = nt_xent_loss(z1, z2, temperature=temperature)
 
             optimiser.zero_grad()

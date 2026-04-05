@@ -5,7 +5,6 @@ import cProfile
 import io
 import pstats
 import time
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -22,8 +21,6 @@ def profile_pipeline(image_path: str) -> None:
     from card_reco.matcher import CardMatcher
     from card_reco.pipeline import (
         _denoise_clahe,
-        _explore_crops,
-        _make_whole_image_card,
     )
 
     image = cv2.imread(image_path)
@@ -54,7 +51,9 @@ def profile_pipeline(image_path: str) -> None:
     candidates = find_card_contours(blurred, min_area, max_area, original_bgr=image)
     t_strategies = time.perf_counter() - t0
     print(
-        f"  find_card_contours (all strategies): {t_strategies * 1000:.1f} ms  ({len(candidates)} candidates)"
+        f"  find_card_contours (all strategies):"
+        f" {t_strategies * 1000:.1f} ms"
+        f"  ({len(candidates)} candidates)"
     )
 
     # Full detection
@@ -62,7 +61,8 @@ def profile_pipeline(image_path: str) -> None:
     detected = detect_cards(image)
     t_detect_total = time.perf_counter() - t0
     print(
-        f"  detect_cards() total: {t_detect_total * 1000:.1f} ms  ({len(detected)} cards detected)"
+        f"  detect_cards() total: {t_detect_total * 1000:.1f} ms"
+        f"  ({len(detected)} cards detected)"
     )
 
     # --- 2. Hashing stage ---
@@ -70,7 +70,7 @@ def profile_pipeline(image_path: str) -> None:
     if detected:
         # Single card hashing
         t0 = time.perf_counter()
-        h0 = compute_hashes(detected[0].image)
+        compute_hashes(detected[0].image)
         t_hash_one = time.perf_counter() - t0
         print(f"  compute_hashes (1 card): {t_hash_one * 1000:.1f} ms")
 
@@ -82,11 +82,13 @@ def profile_pipeline(image_path: str) -> None:
             hash_times.append(time.perf_counter() - t0)
         total_hash = sum(hash_times)
         print(
-            f"  compute_hashes ({len(detected)} cards): {total_hash * 1000:.1f} ms total"
+            f"  compute_hashes ({len(detected)} cards):"
+            f" {total_hash * 1000:.1f} ms total"
         )
         print(f"    avg per card: {total_hash / len(detected) * 1000:.1f} ms")
         print(
-            f"    min/max: {min(hash_times) * 1000:.1f} / {max(hash_times) * 1000:.1f} ms"
+            f"    min/max: {min(hash_times) * 1000:.1f}"
+            f" / {max(hash_times) * 1000:.1f} ms"
         )
 
         # Hash both orientations (what the pipeline actually does)
@@ -97,7 +99,9 @@ def profile_pipeline(image_path: str) -> None:
             compute_hashes(rotated)
         t_hash_both = time.perf_counter() - t0
         print(
-            f"  compute_hashes (both orientations, {len(detected)} cards): {t_hash_both * 1000:.1f} ms"
+            f"  compute_hashes (both orientations,"
+            f" {len(detected)} cards):"
+            f" {t_hash_both * 1000:.1f} ms"
         )
 
     # --- 3. Matching stage ---
@@ -129,7 +133,8 @@ def profile_pipeline(image_path: str) -> None:
             match_times.append(time.perf_counter() - t0)
         total_match = sum(match_times)
         print(
-            f"  find_matches ({len(detected)} queries): {total_match * 1000:.1f} ms total"
+            f"  find_matches ({len(detected)} queries):"
+            f" {total_match * 1000:.1f} ms total"
         )
         print(f"    avg per query: {total_match / len(detected) * 1000:.1f} ms")
 
@@ -199,7 +204,7 @@ def profile_pipeline(image_path: str) -> None:
         print(f"  Hashing:    {total_hash * 1000:.1f} ms ({len(detected)} cards)")
         print(f"  Matching:   {total_match * 1000:.1f} ms ({len(detected)} queries)")
     print(f"  Full pipeline: {t_full * 1000:.1f} ms")
-    print(f"  Target: 200 ms (5 Hz)")
+    print("  Target: 200 ms (5 Hz)")
     if t_full > 0:
         print(f"  Current rate: {1.0 / t_full:.1f} Hz")
         print(f"  Speedup needed: {t_full / 0.2:.1f}x")
