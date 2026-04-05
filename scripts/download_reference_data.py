@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -89,7 +90,8 @@ def download_card_image(
 
     img_dir = data_dir / IMAGES_DIR_NAME / set_id
     img_dir.mkdir(parents=True, exist_ok=True)
-    img_path = img_dir / f"{card_id}{ext}"
+    safe_card_id = re.sub(r'[<>:"/\\|?*]', "_", card_id)
+    img_path = img_dir / f"{safe_card_id}{ext}"
 
     if img_path.exists() and img_path.stat().st_size > 0:
         return img_path
