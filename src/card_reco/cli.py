@@ -88,6 +88,13 @@ def main(argv: list[str] | None = None) -> None:
         default=40.0,
         help="Max combined hash distance for a match (default: 40.0)",
     )
+    scan_parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["hash", "cnn"],
+        default="cnn",
+        help="Matching backend: hash (single-shot) or cnn (real-time, default)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -171,5 +178,6 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         region=region,
         top_n=args.top_n,
         threshold=args.threshold,
+        backend=args.backend,
     )
     scanner.run()

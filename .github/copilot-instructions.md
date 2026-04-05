@@ -38,6 +38,7 @@ src/card_reco/        # Library package
   faiss_index.py      # FAISS vector index for CNN embedding search
   models.py           # Dataclasses (DetectedCard, CardHashes, etc.)
   debug.py            # Debug image writer
+  scanner.py          # Live scanner GUI with real-time CNN identification
   cli.py              # CLI entry point
 scripts/              # Data download, DB build, debugging utilities
 data/                 # Reference images, metadata, hash DB, test photos

@@ -229,7 +229,7 @@ def identify_cards_from_array(
         return []
 
     if backend == "cnn":
-        return _run_cnn_pipeline(
+        paired = _run_cnn_pipeline(
             detected,
             top_n=top_n,
             threshold=threshold,
@@ -238,6 +238,7 @@ def identify_cards_from_array(
             embedder=embedder,
             card_index=card_index,
         )
+        return [matches for _, matches in paired]
 
     all_results: list[list[MatchResult]] = []
 
@@ -505,6 +506,34 @@ def _cnn_fallback_variants(
     return results
 
 
+def identify_detections(
+    detected: list[DetectedCard],
+    *,
+    embedder: CardEmbedder | None = None,
+    card_index: CardIndex | None = None,
+    top_n: int = 5,
+    threshold: float = _CNN_MATCH_THRESHOLD,
+    confident_threshold: float = _CNN_CONFIDENT_THRESHOLD,
+    debug: DebugWriter | None = None,
+) -> list[tuple[DetectedCard, list[MatchResult]]]:
+    """Run CNN identification on pre-detected cards.
+
+    Returns a list of ``(DetectedCard, matches)`` tuples.  Overlapping
+    detections are deduplicated (best score wins).  This is useful when
+    the caller already has detections and wants aligned results for
+    overlay rendering or tracking.
+    """
+    return _run_cnn_pipeline(
+        detected,
+        top_n=top_n,
+        threshold=threshold,
+        confident_threshold=confident_threshold,
+        debug=debug,
+        embedder=embedder,
+        card_index=card_index,
+    )
+
+
 def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     detected: list[DetectedCard],
     *,
@@ -514,17 +543,19 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     debug: DebugWriter | None,
     embedder: CardEmbedder | None,
     card_index: CardIndex | None,
-) -> list[list[MatchResult]]:
+) -> list[tuple[DetectedCard, list[MatchResult]]]:
     """CNN embedding + FAISS search pipeline.
 
     Uses a two-phase early-exit strategy with batch inference:
 
-    1. Batch-embed all detections at 0° full-frame.  Cards that match
+    1. Batch-embed all detections at 0 deg full-frame.  Cards that match
        confidently are done; the rest are queued for fallback variants.
     2. For remaining cards, batch the fallback variants (180 deg, center-
        crop x 0 deg, center-crop x 180 deg) and search.
-    3. Deduplicate — sort all candidates by best score (descending),
+    3. Deduplicate -- sort all candidates by best score (descending),
        then emit results skipping overlapping regions (IoU > 0.5).
+
+    Returns ``(DetectedCard, matches)`` pairs after deduplication.
     """
     # Lazy imports to avoid loading ONNX Runtime when using hash backend.
     # pylint: disable=import-outside-toplevel
@@ -547,7 +578,7 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     candidates: list[tuple[int, DetectedCard, list[MatchResult]]] = []
 
     try:
-        # --- Phase 1: batch-embed 0° full-frame, early-exit confident ---
+        # --- Phase 1: batch-embed 0 deg full-frame, early-exit confident ---
         primary_embs = embedder.embed_batch([c.image for c in detected])
         need_fallback: list[int] = []
 
@@ -572,10 +603,10 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
                 )
             )
 
-        # --- Phase 3: deduplicate — highest scoring first ---
+        # --- Phase 3: deduplicate -- highest scoring first ---
         candidates.sort(key=lambda c: c[2][0].distance if c[2] else -1.0, reverse=True)
 
-        all_results: list[list[MatchResult]] = []
+        paired: list[tuple[DetectedCard, list[MatchResult]]] = []
         claimed_corners: list[np.ndarray] = []
 
         for idx, card, best in candidates:
@@ -583,7 +614,7 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
                 continue
             if debug:
                 debug.save_match_summary(idx, card.image, best)
-            all_results.append(best)
+            paired.append((card, best))
             if best and best[0].distance >= confident_threshold:
                 claimed_corners.append(card.corners)
     finally:
@@ -592,4 +623,4 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
         if owns_index:
             del card_index
 
-    return all_results
+    return paired

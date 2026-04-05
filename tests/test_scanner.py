@@ -1,4 +1,4 @@
-"""Tests for the scanner module and pipeline matcher-reuse refactor."""
+"""Tests for the scanner module, CardTracker, and identify_detections."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from card_reco.scanner import Scanner, _draw_detections, _scale_image
+from card_reco.models import CardRecord, DetectedCard, MatchResult
+from card_reco.scanner import CardTracker, Scanner, _draw_detections, _scale_image
 
 # ---------------------------------------------------------------------------
 # _scale_image
@@ -92,8 +93,8 @@ class TestScannerLifecycle:
         assert scanner._db_path is None  # pylint: disable=protected-access
         assert scanner._monitor_index == 1  # pylint: disable=protected-access
         assert scanner._region is None  # pylint: disable=protected-access
-        assert scanner._matcher is None  # pylint: disable=protected-access
         assert scanner._sct is None  # pylint: disable=protected-access
+        assert scanner._backend == "cnn"  # pylint: disable=protected-access
 
     def test_init_with_params(self) -> None:
         scanner = Scanner(
@@ -102,12 +103,14 @@ class TestScannerLifecycle:
             region=(10, 20, 800, 600),
             top_n=3,
             threshold=30.0,
+            backend="cnn",
         )
         assert scanner._db_path == "test.db"  # pylint: disable=protected-access
         assert scanner._monitor_index == 2  # pylint: disable=protected-access
         assert scanner._region == (10, 20, 800, 600)  # pylint: disable=protected-access
         assert scanner._top_n == 3  # pylint: disable=protected-access
         assert scanner._threshold == 30.0  # pylint: disable=protected-access
+        assert scanner._backend == "cnn"  # pylint: disable=protected-access
 
 
 # ---------------------------------------------------------------------------
@@ -170,3 +173,188 @@ class TestPreCreatedMatcher:  # pylint: disable=too-few-public-methods
             if default and external:
                 assert default[0].card.id == external[0].card.id
                 assert abs(default[0].distance - external[0].distance) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# CardTracker
+# ---------------------------------------------------------------------------
+
+
+def _make_card_record(card_id: str = "card-1", name: str = "Pikachu") -> CardRecord:
+    return CardRecord(
+        id=card_id,
+        name=name,
+        set_id="base1",
+        set_name="Base",
+        number="58",
+        rarity="Common",
+        image_path="base1/58.png",
+    )
+
+
+def _make_match(
+    card_id: str = "card-1",
+    name: str = "Pikachu",
+    distance: float = 0.85,
+) -> MatchResult:
+    return MatchResult(
+        card=_make_card_record(card_id, name),
+        distance=distance,
+        rank=1,
+    )
+
+
+def _make_detection(
+    x: int = 10, y: int = 10, w: int = 100, h: int = 140
+) -> DetectedCard:
+    corners = np.array(
+        [[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
+        dtype=np.float32,
+    )
+    image = np.zeros((h, w, 3), dtype=np.uint8)
+    return DetectedCard(image=image, corners=corners, confidence=1.0)
+
+
+class TestCardTracker:
+    def test_empty_update(self) -> None:
+        tracker = CardTracker()
+        tracker.update([])
+        assert tracker.count == 0
+        assert not tracker.get_display_data()
+
+    def test_single_card_tracked(self) -> None:
+        tracker = CardTracker()
+        det = _make_detection()
+        match = _make_match()
+        tracker.update([(det, [match])])
+
+        assert tracker.count == 1
+        display = tracker.get_display_data()
+        assert len(display) == 1
+        corners, matches = display[0]
+        assert np.array_equal(corners, det.corners)
+        assert matches[0].card.name == "Pikachu"
+
+    def test_returns_voted_match_after_multiple_frames(self) -> None:
+        tracker = CardTracker()
+        det = _make_detection()
+        m1 = _make_match("card-1", "Pikachu", 0.85)
+        m2 = _make_match("card-2", "Raichu", 0.80)
+
+        # 3 frames with Pikachu, 1 with Raichu → Pikachu wins.
+        tracker.update([(det, [m1])])
+        tracker.update([(det, [m1])])
+        tracker.update([(det, [m1])])
+        tracker.update([(det, [m2])])
+
+        display = tracker.get_display_data()
+        assert len(display) == 1
+        assert display[0][1][0].card.name == "Pikachu"
+
+    def test_new_card_creates_second_track(self) -> None:
+        tracker = CardTracker()
+        det_a = _make_detection(10, 10, 100, 140)
+        det_b = _make_detection(300, 10, 100, 140)
+        match_a = _make_match("a", "Pikachu")
+        match_b = _make_match("b", "Charizard")
+
+        tracker.update([(det_a, [match_a])])
+        assert tracker.count == 1
+
+        tracker.update([(det_a, [match_a]), (det_b, [match_b])])
+        assert tracker.count == 2
+
+    def test_stale_tracks_removed(self) -> None:
+        tracker = CardTracker()
+        det = _make_detection()
+        match = _make_match()
+
+        tracker.update([(det, [match])])
+        assert tracker.count == 1
+
+        # Simulate the card disappearing for many frames.
+        for _ in range(6):
+            tracker.update([])
+        assert tracker.count == 0
+
+    def test_clear(self) -> None:
+        tracker = CardTracker()
+        det = _make_detection()
+        match = _make_match()
+        tracker.update([(det, [match])])
+        assert tracker.count == 1
+
+        tracker.clear()
+        assert tracker.count == 0
+
+    def test_iou_matching_updates_existing_track(self) -> None:
+        tracker = CardTracker()
+        det1 = _make_detection(10, 10, 100, 140)
+        det2 = _make_detection(12, 12, 100, 140)  # Slightly shifted
+        m1 = _make_match("card-1", "Pikachu", 0.8)
+        m2 = _make_match("card-1", "Pikachu", 0.9)
+
+        tracker.update([(det1, [m1])])
+        tracker.update([(det2, [m2])])
+
+        # Should still be 1 tracked card, not 2.
+        assert tracker.count == 1
+        display = tracker.get_display_data()
+        # Best score should be 0.9 (the higher one stored in best_per_id).
+        assert display[0][1][0].distance == 0.9
+
+    def test_no_match_card(self) -> None:
+        tracker = CardTracker()
+        det = _make_detection()
+        tracker.update([(det, [])])
+
+        assert tracker.count == 1
+        display = tracker.get_display_data()
+        assert display[0][1] == []
+
+
+# ---------------------------------------------------------------------------
+# identify_detections integration
+# ---------------------------------------------------------------------------
+
+FAISS_INDEX = Path("data") / "card_embeddings.faiss"
+has_cnn_data = FAISS_INDEX.exists()
+skip_no_cnn = pytest.mark.skipif(
+    not has_cnn_data,
+    reason="CNN model or FAISS index not available",
+)
+
+
+@skip_no_cnn
+class TestIdentifyDetections:  # pylint: disable=too-few-public-methods
+    def test_returns_paired_results(self) -> None:
+        """identify_detections returns (DetectedCard, matches) tuples."""
+        import cv2  # pylint: disable=import-outside-toplevel
+
+        from card_reco.detector import (  # pylint: disable=import-outside-toplevel
+            detect_cards,
+        )
+        from card_reco.pipeline import (  # pylint: disable=import-outside-toplevel
+            identify_detections,
+        )
+
+        img_dir = TEST_DATA_DIR / "single_cards" / "axis_aligned"
+        if not img_dir.exists():
+            pytest.skip("axis_aligned test images not available")
+        images = list(img_dir.glob("*.png")) + list(img_dir.glob("*.jpg"))
+        if not images:
+            pytest.skip("No test images found")
+
+        image = cv2.imread(str(images[0]))
+        assert image is not None
+
+        detections = detect_cards(image, max_detect_dim=1024, fast=True)
+        assert len(detections) > 0
+
+        pairs = identify_detections(detections)
+        assert len(pairs) > 0
+        for card, matches in pairs:
+            assert hasattr(card, "corners")
+            assert hasattr(card, "image")
+            if matches:
+                assert matches[0].card.name  # has a name

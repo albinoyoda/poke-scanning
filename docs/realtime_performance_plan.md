@@ -188,95 +188,96 @@ to ~50 ms. Trades ~2 detections for significant speed improvement.
 
 ---
 
-### Phase B — Video Pipeline Architecture (target: ≥5 effective FPS)
+### Phase B — Video Pipeline Architecture (target: >=5 effective FPS)
 
-These changes introduce a fundamentally different processing model
-for video streams.
+These changes update the Scanner GUI for real-time continuous scanning.
 
-#### B1. Detect-Once, Track-Many
+#### B1. Continuous CNN Scanning with IoU Tracking ✅ IMPLEMENTED
 
-**Problem**: Running the full detect+identify pipeline on every frame
-is unnecessary when cards don't move much between frames.
+**Problem**: The original Scanner required manually pressing "Scan" for
+each one-shot hash-based identification. No real-time capability.
 
-**Fix**: Use OpenCV's lightweight trackers between detection frames:
+**Fix**: Rewrote the `Scanner` class with a continuous scan loop:
 
-```
-Frame 0:  Full detect + identify  (~250 ms)
-Frame 1:  MOSSE/KCF track only   (~2-5 ms per card)
-Frame 2:  Track only              (~2-5 ms)
-...
-Frame N:  Re-detect + identify    (~250 ms)
-```
+- **Scan/Stop toggle**: The "Scan" button starts continuous real-time
+  scanning; pressing again stops it.
+- **Background thread**: Runs `detect_cards(fast=True, max_detect_dim=1024)`
+  + `identify_detections()` in a tight loop (~5 Hz).
+- **CNN backend**: Default backend switched from hash to CNN.
+  Pre-loads `CardEmbedder` and `CardIndex` on startup for zero
+  first-scan latency.
 
-With N=5, effective frame rate:
-- 1 detection frame: 250 ms
-- 4 tracking frames: 4 × 5 ms = 20 ms
-- Total for 5 frames: 270 ms → **18.5 FPS effective**
+**New public API**: `identify_detections()` in `pipeline.py` returns
+paired `(DetectedCard, list[MatchResult])` tuples, enabling the scanner
+to get aligned detection corners and identification results without
+double-detecting.
 
-**Tracker options** (from OpenCV tracking API):
+**Implementation**: `_scan_loop()` runs in a daemon thread. Each
+iteration captures a frame, detects, identifies, and feeds results
+into the `CardTracker`.
 
-| Tracker | FPS | Notes |
-|---|---|---|
-| MOSSE | 450+ | Fastest, good failure detection |
-| KCF | ~200 | Good accuracy/speed balance |
-| CSRT | ~25 | Best accuracy, slowest |
+Note: OpenCV MOSSE/KCF tracking was evaluated but not implemented.
+Since the pipeline already runs at 5.4 Hz with fast mode, IoU-based
+frame-to-frame matching is sufficient and avoids the opencv-contrib
+dependency.  Real OpenCV trackers would improve overlay smoothness
+at higher video framerates but aren't needed at current speeds.
 
-MOSSE is recommended for card tracking — cards are rigid rectangles
-with stable appearance, playing to MOSSE's strengths.
+**Effort**: Medium.
 
-**Effort**: Medium — requires new `VideoScanner` class.
+#### B2. CardTracker — IoU Matching + Temporal Voting ✅ IMPLEMENTED
 
-#### B2. Identification Caching
+**Problem**: Single-frame identification can be noisy (reflections,
+motion blur, partial occlusion). Overlays flicker between frames.
+
+**Fix**: New `CardTracker` class in `scanner.py`:
+
+- **IoU matching**: Each frame's detections are matched to existing
+  tracked cards using greedy IoU matching (threshold 0.3).
+- **Temporal voting**: Each tracked card accumulates a sliding window
+  of top-1 card ID votes (last 10 frames). The display shows the
+  most-voted identification, filtering transient misidentifications.
+- **Best-score tracking**: For each voted card ID, the highest
+  similarity score seen is stored and displayed.
+- **Stale removal**: Tracked cards not seen for 5 consecutive frames
+  are automatically removed.
+
+**Benefits**:
+- Stable overlays even with noisy per-frame identification
+- Cards persist through brief occlusion
+- Natural UX: card name stabilises after ~2-3 frames (~0.5s)
+
+**Effort**: Low.
+
+#### B3. Identification Caching — Not Yet Implemented
 
 **Problem**: Re-identifying a card every time the full pipeline runs
 wastes embedding time when the card hasn't changed.
 
-**Fix**: Maintain a cache mapping tracked card regions to their
-identification results. Only re-identify when:
-- A new card enters the scene
-- A tracked card's IoU with its last identified position drops below 0.5
-- The tracker reports failure/occlusion
+**Fix**: Skip CNN embedding for tracked cards whose IoU with their
+previous position exceeds a threshold. Only embed new cards.
 
-**Estimated saving**: After initial identification, subsequent
-detection frames only need to identify *new* cards.
+**Estimated saving**: With 7 cards and only 1 new card per frame,
+would reduce embedding from ~80 ms (7 cards) to ~12 ms (1 card).
 
-**Effort**: Low (on top of B1).
+**Status**: Not needed yet — 5.4 Hz is sufficient. Worth implementing
+if the pipeline needs to scale to 10+ Hz.
 
-#### B3. Temporal Majority Voting
+**Effort**: Low (on top of B2).
 
-**Problem**: Single-frame identification can be noisy (reflections,
-motion blur, partial occlusion).
-
-**Fix**: Accumulate identification votes across N consecutive frames
-per tracked card. Only emit a confident identification once a card
-has been identified as the same card in ≥3 out of 5 frames. This
-is the approach used by AceTrack-AI (YOLOv11 + temporal voting)
-for real-time playing card identification.
-
-**Benefits**:
-- Filters out transient misidentifications from glare/blur
-- Allows using a *lower* confident threshold per frame since
-  consensus provides the confidence guarantee
-- Natural UX: card name appears after ~0.5s of stability
-
-**Effort**: Low (on top of B1/B2).
-
-#### B4. Async Pipeline with Threading
+#### B4. Async Pipeline with Threading — Not Yet Implemented
 
 **Problem**: Detection and identification are sequential. While
 identifying card N, no new frames are being captured.
 
 **Fix**: Three-thread architecture:
-- **Thread A (capture)**: Captures frames, runs tracker update,
-  renders overlay. Targets display framerate (15-30 FPS).
-- **Thread B (detection)**: Pulls every Nth frame from A,
-  runs `detect_cards()`, updates tracker targets.
-- **Thread C (identification)**: When B finds new/changed cards,
-  runs CNN embedding + FAISS search, updates ID cache.
+- **Thread A (capture)**: Captures frames, renders overlay. Targets
+  display framerate (15-30 FPS).
+- **Thread B (pipeline)**: Pulls every Nth frame from A, runs full
+  detect + identify, updates tracker.
+- **Thread C (display)**: Smooth interpolation between pipeline frames.
 
-All three operate on the same shared card state (with proper locking).
-Detection and identification latency is hidden behind the tracker's
-smooth interpolation.
+**Status**: Not needed yet. Current two-thread design (main UI +
+background scan loop) provides adequate responsiveness.
 
 **Effort**: Medium-high — threading + state management.
 
@@ -358,24 +359,28 @@ has worse accuracy. For real-time use, it should be deprecated:
 
 | # | Change | Result | Status |
 |---|---|---|---|
-| A1 | Batch ONNX inference | 480→284 ms embed | ✅ Done |
-| A2 | Early-exit on confident match | Skip 75% of fallback variants | ✅ Done |
-| A3 | Detection at 1024px | 272→134 ms detect | ✅ Done |
-| A4 | Skip overlapping pre-embedding | Caused quality regression | ❌ Dropped |
-| A5 | Fast-mode strategies | Drop HSV+morph+Hough | ✅ Done |
-| | **Static image: 862→185 ms (5.4 Hz, 4.7× speedup)** | | |
-| B1 | Detect-once, track-many | ~18 effective FPS | Not started |
-| B2 | Identification caching | Skip re-ID of known cards | Not started |
-| B3 | Temporal majority voting | Robust identification | Not started |
+| A1 | Batch ONNX inference | 480->284 ms embed | Done |
+| A2 | Early-exit on confident match | Skip 75% of fallback variants | Done |
+| A3 | Detection at 1024px | 272->134 ms detect | Done |
+| A4 | Skip overlapping pre-embedding | Caused quality regression | Dropped |
+| A5 | Fast-mode strategies | Drop HSV+morph+Hough | Done |
+| | **Static image: 862->185 ms (5.4 Hz, 4.7x speedup)** | | |
+| B1 | Continuous CNN scanning + IoU tracking | Real-time Scanner at ~5 Hz | Done |
+| B2 | Temporal majority voting (CardTracker) | Stable overlays | Done |
+| B3 | Identification caching | Skip re-ID of known cards | Not started |
 | B4 | Async threading | Smooth video overlay | Not started |
-| | **Video: ~15-20 effective FPS** | | |
-| C1 | CUDA embedding | 5-20× embed speedup | Not started |
+| | **Scanner: ~5 Hz continuous, stable IDs** | | |
+| C1 | CUDA embedding | 5-20x embed speedup | Not started |
 | C3 | YOLO card detection | 5-15 ms detection | Not started |
-| C4 | Smaller embedding dim | 4.5× FAISS speedup | Not started |
+| C4 | Smaller embedding dim | 4.5x FAISS speedup | Not started |
 
-**Phase A is complete. A1+A2+A3+A5 achieved 5.4 Hz (4.7× over baseline).**
-Default CNN (A1+A2 only) runs at 2.3 Hz — safe for all test images.
-Adding B1 (tracking) would get video to ~15+ effective FPS.
+**Phases A and B (core) are complete.**
+
+- Phase A: CNN pipeline optimised from 862 ms to 185 ms (5.4 Hz, 4.7x).
+- Phase B: Scanner rewritten for continuous real-time identification
+  with IoU tracking and temporal voting.  Press Scan to start, Stop to
+  end.  Cards are identified at ~5 Hz with voted-best labels displayed
+  on the live preview.
 
 ---
 
@@ -391,4 +396,4 @@ Adding B1 (tracking) would get video to ~15+ effective FPS.
 | This repo (CNN, original) | Contour+5 strategies | MobileNetV3+FAISS | 1.16 Hz |
 | **This repo (CNN, default)** | **Contour+5 strategies** | **MobileNetV3+FAISS (batch, early-exit)** | **2.3 Hz** |
 | **This repo (CNN, fast)** | **Contour (fast, 1024px)** | **MobileNetV3+FAISS (batch, early-exit)** | **5.4 Hz** |
-| **This repo (video, projected)** | **Contour + MOSSE tracking** | **CNN + ID cache + voting** | **~15+ FPS** |
+| **This repo (Scanner)** | **Contour (fast, 1024px) + IoU tracking** | **CNN + temporal voting** | **~5 Hz continuous** |
