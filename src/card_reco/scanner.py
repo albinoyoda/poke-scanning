@@ -170,9 +170,6 @@ class Scanner:
     def _do_scan(self, frame: np.ndarray) -> None:
         """Run the full pipeline on *frame* in a background thread."""
         try:
-            if self._matcher is None:
-                self._matcher = CardMatcher(self._db_path)
-
             t0 = time.perf_counter()
             detections = detect_cards(frame)
             t_detect = time.perf_counter() - t0
@@ -331,6 +328,12 @@ class Scanner:
 
         self._scan_btn = ttk.Button(btn_frame, text="Scan", command=self._on_scan)
         self._scan_btn.pack(pady=10, ipadx=20, ipady=10)
+
+        # Create the matcher and preload the hash matrix now, on the main
+        # thread.  This ensures the SQLite connection is only ever accessed
+        # from this thread, so close() can be safely called here too.
+        self._matcher = CardMatcher(self._db_path)
+        self._matcher.preload()
 
         # Start live preview loop.
         self._root.after(0, self._refresh_preview)
