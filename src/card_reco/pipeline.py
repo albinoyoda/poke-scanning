@@ -16,6 +16,7 @@ from card_reco.detector import (
     refine_corners_edge_intersect,
 )
 from card_reco.detector.constants import make_clahe
+from card_reco.detector.nms import compute_overlap
 from card_reco.hasher import compute_hashes
 from card_reco.matcher import CardMatcher
 from card_reco.models import CardHashes, DetectedCard, MatchResult
@@ -43,6 +44,18 @@ _CROP_PADDINGS: tuple[float, ...] = (-3.0, 2.0)
 # Tolerance for considering the input image a single card (aspect ratio).
 _CARD_AR = CARD_WIDTH / CARD_HEIGHT  # ~0.714
 _AR_TOLERANCE = 0.12
+
+# IoU threshold for skipping a detection that overlaps a confidently-
+# matched card.  0.5 means at least half the bounding boxes overlap.
+_CLAIMED_OVERLAP_THRESH = 0.5
+
+
+def _is_claimed(corners: np.ndarray, claimed: list[np.ndarray]) -> bool:
+    """Return True if *corners* overlaps any already-claimed region."""
+    for claimed_corners in claimed:
+        if compute_overlap(corners, claimed_corners) > _CLAIMED_OVERLAP_THRESH:
+            return True
+    return False
 
 
 def _make_whole_image_card(image: np.ndarray) -> DetectedCard | None:
@@ -76,13 +89,15 @@ def _make_whole_image_card(image: np.ndarray) -> DetectedCard | None:
 
 
 def _denoise_clahe(image: np.ndarray) -> np.ndarray:
-    """Apply non-local means denoising + CLAHE contrast enhancement.
+    """Apply bilateral filter denoising + CLAHE contrast enhancement.
 
     Reduces camera sensor noise and normalises local contrast so that
     photos of holographic / reflective cards hash closer to clean
-    reference scans.
+    reference scans.  Uses bilateral filtering instead of non-local
+    means for a ~100x speed improvement with comparable edge
+    preservation.
     """
-    denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+    denoised = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)
     lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
     clahe = make_clahe()
     lab[:, :, 0] = clahe.apply(lab[:, :, 0])
@@ -215,8 +230,22 @@ def _run_matching(
     confident_threshold: float,
     debug: DebugWriter | None,
 ) -> None:
-    """Match each detected card using *matcher* (extraction of inner loop)."""
+    """Match each detected card using *matcher* (extraction of inner loop).
+
+    Once a detection matches confidently (distance below
+    *confident_threshold*), subsequent detections that overlap it by
+    more than 50 % IoU are skipped.  This avoids redundant hashing and
+    matching of duplicate cutouts for the same physical card.
+    """
+    # Corners of confidently-matched detections — used to skip
+    # overlapping cutouts later in the list.
+    claimed_corners: list[np.ndarray] = []
+
     for i, card in enumerate(detected):
+        # Skip if this detection overlaps a previously matched card.
+        if _is_claimed(card.corners, claimed_corners):
+            continue
+
         enable_relaxed_fallback = card.confidence >= _RELAXED_FALLBACK_MIN_CONFIDENCE
 
         # Try the card as-is first (0° orientation).
@@ -236,6 +265,7 @@ def _run_matching(
             if debug:
                 debug.save_match_summary(i, card.image, best_matches)
             all_results.append(best_matches)
+            claimed_corners.append(card.corners)
             continue
 
         # Try 180° rotation and keep whichever orientation matched better.
@@ -266,6 +296,7 @@ def _run_matching(
                 best_matches,
                 top_n=top_n,
                 threshold=threshold,
+                confident_threshold=confident_threshold,
                 enable_relaxed_fallback=enable_relaxed_fallback,
                 card_hashes_0=hashes,
                 card_hashes_180=hashes_180,
@@ -274,6 +305,10 @@ def _run_matching(
         if debug:
             debug.save_match_summary(i, card.image, best_matches)
         all_results.append(best_matches)
+
+        # Claim the region so overlapping detections are skipped.
+        if best_matches and best_matches[0].distance < confident_threshold:
+            claimed_corners.append(card.corners)
 
 
 def _explore_crops(
@@ -284,6 +319,7 @@ def _explore_crops(
     *,
     top_n: int,
     threshold: float,
+    confident_threshold: float = 25.0,
     enable_relaxed_fallback: bool,
     card_hashes_0: CardHashes,
     card_hashes_180: CardHashes,
@@ -295,6 +331,8 @@ def _explore_crops(
     to the reference.  This function re-warps the card region at
     several padding levels and applies denoise + CLAHE preprocessing,
     keeping whichever configuration produces the lowest match distance.
+
+    Exits early when a match below *confident_threshold* is found.
 
     *card_hashes_0* and *card_hashes_180* are the already-computed
     hashes for the card at 0° and 180° orientations.  They are reused
@@ -322,6 +360,8 @@ def _explore_crops(
         )
         if matches and (not best or matches[0].distance < best[0].distance):
             best = matches
+            if best[0].distance < confident_threshold:
+                return best
 
     # Build remaining candidate images (denoised, refined, padded).
     candidate_images: list[np.ndarray] = []
@@ -360,5 +400,7 @@ def _explore_crops(
             )
             if matches and (not best or matches[0].distance < best[0].distance):
                 best = matches
+                if best[0].distance < confident_threshold:
+                    return best
 
     return best

@@ -88,6 +88,8 @@ class CardMatcher:
         self._cards: list[CardRecord] | None = None
         # shape (N, 4, hash_bits) — 4 hash types per card, each as bit array
         self._hash_matrix: np.ndarray | None = None
+        # Pre-built name→indices mapping for vectorised name-group fallback
+        self._name_to_indices: dict[str, np.ndarray] | None = None
 
     def preload(self) -> None:
         """Eagerly load the hash matrix from the database.
@@ -116,6 +118,7 @@ class CardMatcher:
         if not cards:
             self._cards = []
             self._hash_matrix = np.empty((0, 4, 0), dtype=np.uint8)
+            self._name_to_indices = {}
             return self._cards, self._hash_matrix
 
         # Build (N, 4, hash_bits) matrix from hex strings
@@ -127,13 +130,20 @@ class CardMatcher:
             for j, key in enumerate(_WEIGHT_ORDER):
                 matrix[i, j] = hex_to_bits(getattr(card, key))
 
+        # Build name→indices mapping for fast name-group lookups.
+        name_map: dict[str, list[int]] = {}
+        for i, card in enumerate(cards):
+            name_map.setdefault(card.name, []).append(i)
+        self._name_to_indices = {
+            name: np.array(idxs, dtype=np.int64) for name, idxs in name_map.items()
+        }
+
         self._cards = cards
         self._hash_matrix = matrix
         return self._cards, self._hash_matrix
 
     def _name_group_fallback(
         self,
-        cards: list[CardRecord],
         combined: np.ndarray,
         headroom_limit: float,
         min_consensus: int,
@@ -145,38 +155,42 @@ class CardMatcher:
         is closest, then accepts via consensus or separation.  Returns
         indices of the winning name's variants within headroom, or an
         empty array when no name qualifies.
+
+        Uses a pre-built name→indices mapping and NumPy fancy indexing
+        for speed.
         """
-        name_groups = _build_name_groups(cards, combined, headroom_limit)
+        assert self._name_to_indices is not None
 
-        # Rank name groups by their best variant's distance.
-        ranked_names = sorted(name_groups, key=lambda n: name_groups[n][0])
-        if not ranked_names:
+        best_name: str | None = None
+        best_dist = float("inf")
+        best_n_close = 0
+        second_best_dist: float | None = None
+
+        for name, idxs in self._name_to_indices.items():
+            group_dists = combined[idxs]
+            group_best = float(group_dists.min())
+            n_close = int((group_dists <= headroom_limit).sum())
+
+            if group_best < best_dist:
+                second_best_dist = best_dist
+                best_dist = group_best
+                best_name = name
+                best_n_close = n_close
+            elif second_best_dist is None or group_best < second_best_dist:
+                second_best_dist = group_best
+
+        if best_name is None or best_dist > headroom_limit:
             return np.empty(0, dtype=np.int64)
 
-        best_name = ranked_names[0]
-        best_dist, _, n_close = name_groups[best_name]
-
-        if best_dist > headroom_limit:
-            return np.empty(0, dtype=np.int64)
-
-        second_best_dist = (
-            name_groups[ranked_names[1]][0] if len(ranked_names) > 1 else None
-        )
         if not _accept_by_consensus_or_separation(
-            n_close, min_consensus, best_dist, second_best_dist, min_separation
+            best_n_close, min_consensus, best_dist, second_best_dist, min_separation
         ):
             return np.empty(0, dtype=np.int64)
 
-        # Return all variants of the winning name within headroom
-        # (stage-2 variant refinement).
-        return np.array(
-            [
-                k
-                for k, card in enumerate(cards)
-                if card.name == best_name and float(combined[k]) <= headroom_limit
-            ],
-            dtype=np.int64,
-        )
+        # Return all variants of the winning name within headroom.
+        idxs = self._name_to_indices[best_name]
+        mask = combined[idxs] <= headroom_limit
+        return idxs[mask]
 
     def find_matches(
         self,
@@ -240,7 +254,6 @@ class CardMatcher:
         # Relaxed fallback via name-group two-stage matching.
         if len(indices) == 0 and enable_relaxed_fallback and len(combined) > 0:
             indices = self._name_group_fallback(
-                cards,
                 combined,
                 headroom_limit=threshold + relaxed_headroom,
                 min_consensus=min_consensus,
