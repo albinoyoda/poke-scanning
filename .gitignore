@@ -9,11 +9,6 @@ build/
 venv/
 .env
 
-# Data directories (large, downloaded at build-time)
-data/images/
-data/metadata/
-data/*.db
-
 # IDE
 .vscode/
 .idea/
