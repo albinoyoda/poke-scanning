@@ -60,9 +60,64 @@ __all__ = [
 ]
 
 
+def _downscale_for_detection(
+    image: NDArray[np.uint8], max_dim: int
+) -> tuple[NDArray[np.uint8], float]:
+    """Return *(detect_image, scale)* — downscale if *max_dim* > 0."""
+    h, w = image.shape[:2]
+    if 0 < max_dim < max(h, w):
+        scale = max_dim / max(h, w)
+        resized = cv2.resize(
+            image,
+            (int(w * scale), int(h * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+        return np.asarray(resized, dtype=np.uint8), scale
+    return image, 1.0
+
+
+def _validate_contour(
+    contour: NDArray[np.uint8],
+    min_area: float,
+    primary_edges: NDArray[np.uint8],
+    detect_area: int,
+    scale: float,
+    image: NDArray[np.uint8],
+) -> DetectedCard | None:
+    """Extract and validate a single contour, returning a DetectedCard or None."""
+    corners = extract_corners(contour)
+    if corners is None:
+        return None
+    if not has_card_aspect_ratio(corners):
+        return None
+
+    contour_pts = corners.reshape((4, 1, 2)).astype(np.int32)
+    area = cv2.contourArea(contour_pts)
+    if area < min_area:
+        return None
+
+    edge_frac = corner_edge_fraction(corners, primary_edges)
+    if edge_frac < _MIN_CORNER_EDGE_FRAC:
+        return None
+
+    quality = contour_quality(contour, corners, detect_area)
+    confidence = quality * edge_frac
+    orig_corners = corners / scale if scale != 1.0 else corners
+    warped = _four_point_transform(image, orig_corners)
+    return DetectedCard(
+        image=warped,
+        corners=orig_corners,
+        confidence=confidence,
+        contour=contour,
+    )
+
+
 def detect_cards(
     image: NDArray[np.uint8],
     debug: DebugWriter | None = None,
+    *,
+    max_detect_dim: int = 0,
+    fast: bool = False,
 ) -> list[DetectedCard]:
     """Detect and extract Pokemon cards from an image.
 
@@ -70,21 +125,32 @@ def detect_cards(
     analysis, then applies perspective transforms to produce normalized
     top-down views of each card.
 
+    When *max_detect_dim* is set (> 0) the image is downscaled so its
+    longest edge does not exceed *max_detect_dim* pixels.  Detection
+    runs on the smaller image for speed; the perspective warp still
+    uses the original full-resolution image.
+
+    When *fast* is ``True``, only the two cheapest detection strategies
+    (Canny + adaptive threshold) are used, skipping HSV colour
+    segmentation, morphological closing, and Hough-line detection.
+
     When *debug* is provided, intermediate images are written to its
     output directory.
     """
     if debug:
         debug.save_input(image)
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    detect_image, scale = _downscale_for_detection(image, max_detect_dim)
+
+    gray = cv2.cvtColor(detect_image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     if debug:
         debug.save_preprocessed(gray, blurred)
 
-    image_area = image.shape[0] * image.shape[1]
-    min_area = image_area * MIN_CARD_AREA_RATIO
-    max_area = image_area * MAX_CARD_AREA_RATIO
+    detect_area = detect_image.shape[0] * detect_image.shape[1]
+    min_area = detect_area * MIN_CARD_AREA_RATIO
+    max_area = detect_area * MAX_CARD_AREA_RATIO
 
     detected: list[DetectedCard] = []
 
@@ -97,52 +163,37 @@ def detect_cards(
 
     # Try multiple edge detection strategies and merge results
     candidates = find_card_contours(
-        blurred, min_area, max_area, original_bgr=image, debug=debug
+        blurred,
+        min_area,
+        max_area,
+        original_bgr=detect_image,
+        debug=debug,
+        fast=fast,
     )
 
     if debug:
-        debug.save_candidates(image, candidates, min_area)
+        debug.save_candidates(detect_image, candidates, min_area)
 
     all_corners: list[NDArray[np.float32]] = []
     corner_labels: list[str] = []
 
     for contour in candidates:
-        corners = extract_corners(contour)
-        if corners is None:
-            continue
-
-        if not has_card_aspect_ratio(corners):
-            continue
-
-        contour_pts = corners.reshape((4, 1, 2)).astype(np.int32)
-        area = cv2.contourArea(contour_pts)
-        if area < min_area:
-            continue
-
-        # Verify corners sit near Canny edges.
-        edge_frac = corner_edge_fraction(corners, primary_edges)
-        if edge_frac < _MIN_CORNER_EDGE_FRAC:
-            continue
-
-        # Quality-based confidence instead of raw area.
-        quality = contour_quality(contour, corners, image_area)
-        confidence = quality * edge_frac
-
-        warped = _four_point_transform(image, corners)
-        detected.append(
-            DetectedCard(
-                image=warped,
-                corners=corners,
-                confidence=confidence,
-                contour=contour,
-            )
+        det = _validate_contour(
+            contour, min_area, primary_edges, detect_area, scale, image
         )
-        all_corners.append(corners)
-        pct = area / image_area * 100
-        corner_labels.append(f"{len(detected) - 1} {pct:.0f}% q={confidence:.2f}")
+        if det is None:
+            continue
+
+        detected.append(det)
+        # Use detect-resolution corners for debug overlays.
+        det_corners = det.corners * scale if scale != 1.0 else det.corners
+        all_corners.append(det_corners)
+        area = cv2.contourArea(det_corners.reshape((4, 1, 2)).astype(np.int32))
+        pct = area / detect_area * 100
+        corner_labels.append(f"{len(detected) - 1} {pct:.0f}% q={det.confidence:.2f}")
 
     if debug and all_corners:
-        debug.save_corners(image, all_corners, corner_labels)
+        debug.save_corners(detect_image, all_corners, corner_labels)
 
     # Remove overlapping detections
     before_nms = len(detected)
@@ -152,7 +203,7 @@ def detect_cards(
     detected = centroid_dedup(detected)
 
     if debug:
-        debug.save_nms_result(image, before_nms, detected)
+        debug.save_nms_result(detect_image, before_nms, detected)
         for i, det in enumerate(detected):
             debug.save_warped(i, det.image)
 

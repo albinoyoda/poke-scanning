@@ -29,8 +29,15 @@ def find_card_contours(
     max_area: float,
     original_bgr: NDArray[np.uint8] | None = None,
     debug: DebugWriter | None = None,
+    *,
+    fast: bool = False,
 ) -> list[NDArray[np.uint8]]:
-    """Find contours that could be cards using multiple strategies."""
+    """Find contours that could be cards using multiple strategies.
+
+    When *fast* is ``True``, only Canny and adaptive-threshold strategies
+    are used, skipping the slower HSV, morphological-close, and Hough
+    strategies.
+    """
     candidates: list[NDArray[np.uint8]] = []
     seen: set[tuple[int, int, int]] = set()
 
@@ -91,25 +98,29 @@ def find_card_contours(
         _collect(contours)
 
     # Strategy 3: HSV color segmentation for colored card borders
-    if original_bgr is not None:
+    if not fast and original_bgr is not None:
         _collect_hsv_contours(original_bgr, _collect, debug=debug)
 
     # Strategy 4: Morphological closing on Canny to bridge edge gaps
-    edged_base = cv2.Canny(blurred, 50, 150)
-    close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    closed = cv2.morphologyEx(edged_base, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+    if not fast:
+        edged_base = cv2.Canny(blurred, 50, 150)
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed = cv2.morphologyEx(
+            edged_base, cv2.MORPH_CLOSE, close_kernel, iterations=2
+        )
 
-    if debug:
-        debug.save_edge_map("morph_close", closed)
+        if debug:
+            debug.save_edge_map("morph_close", closed)
 
-    for retr_mode in (cv2.RETR_EXTERNAL, cv2.RETR_TREE):
-        contours, _ = cv2.findContours(closed, retr_mode, cv2.CHAIN_APPROX_SIMPLE)
-        _collect(contours)
+        for retr_mode in (cv2.RETR_EXTERNAL, cv2.RETR_TREE):
+            contours, _ = cv2.findContours(closed, retr_mode, cv2.CHAIN_APPROX_SIMPLE)
+            _collect(contours)
 
     # Strategy 5: Hough-line quad detection
-    hough_contour = _hough_quad(blurred, min_area, debug=debug)
-    if hough_contour is not None:
-        _collect([hough_contour])
+    if not fast:
+        hough_contour = _hough_quad(blurred, min_area, debug=debug)
+        if hough_contour is not None:
+            _collect([hough_contour])
 
     return candidates
 

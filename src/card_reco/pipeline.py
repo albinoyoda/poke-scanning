@@ -132,6 +132,8 @@ def identify_cards(
     threshold: float = 40.0,
     debug: DebugWriter | None = None,
     backend: str = "hash",
+    max_detect_dim: int = 0,
+    fast: bool = False,
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards in an image.
 
@@ -144,6 +146,12 @@ def identify_cards(
         debug: Optional DebugWriter for saving intermediate images.
         backend: ``"hash"`` for perceptual hashing, ``"cnn"`` for CNN
             embedding + FAISS search.
+        max_detect_dim: When > 0, downscale the image so its longest
+            edge does not exceed this many pixels during detection.
+            Perspective warps still use the full-resolution image.
+        fast: When ``True``, use only the fastest detection strategies
+            (Canny + adaptive threshold), skipping HSV, morph-close,
+            and Hough line detection.
 
     Returns:
         A list of match lists — one per detected card in the image.
@@ -165,6 +173,8 @@ def identify_cards(
         threshold=threshold,
         debug=debug,
         backend=backend,
+        max_detect_dim=max_detect_dim,
+        fast=fast,
     )
 
 
@@ -179,6 +189,8 @@ def identify_cards_from_array(
     backend: str = "hash",
     embedder: CardEmbedder | None = None,
     card_index: CardIndex | None = None,
+    max_detect_dim: int = 0,
+    fast: bool = False,
 ) -> list[list[MatchResult]]:
     """Identify Pokemon cards from a BGR numpy array.
 
@@ -198,8 +210,13 @@ def identify_cards_from_array(
 
     Set *backend* to ``"cnn"`` to use CNN embeddings + FAISS search.
     Provide *embedder* and *card_index* to reuse pre-loaded resources.
+
+    *max_detect_dim* and *fast* are forwarded to
+    :func:`~card_reco.detector.detect_cards`.
     """
-    detected = detect_cards(image, debug=debug)
+    detected = detect_cards(
+        image, debug=debug, max_detect_dim=max_detect_dim, fast=fast
+    )
 
     # When the input itself looks like a single card, inject a
     # "whole-image" candidate so that pre-cropped photos can match
@@ -454,6 +471,40 @@ def _center_crop(image: np.ndarray, fraction: float) -> np.ndarray:
     return np.asarray(image[y : y + ch, x : x + cw], dtype=np.uint8)
 
 
+def _cnn_fallback_variants(
+    detected: list[DetectedCard],
+    need_fallback: list[int],
+    primary_embs: np.ndarray,
+    embedder: CardEmbedder,
+    card_index: CardIndex,
+    top_n: int,
+    threshold: float,
+) -> list[tuple[int, DetectedCard, list[MatchResult]]]:
+    """Batch-embed and search fallback variants for non-confident cards."""
+    fallback_images: list[np.ndarray] = []
+    for idx in need_fallback:
+        card = detected[idx]
+        img_180 = np.asarray(cv2.rotate(card.image, cv2.ROTATE_180), dtype=np.uint8)
+        crop = _center_crop(card.image, _CNN_CENTER_CROP)
+        crop_180 = np.asarray(cv2.rotate(crop, cv2.ROTATE_180), dtype=np.uint8)
+        fallback_images.extend([img_180, crop, crop_180])
+
+    fallback_embs = embedder.embed_batch(fallback_images)
+    results: list[tuple[int, DetectedCard, list[MatchResult]]] = []
+
+    for j, idx in enumerate(need_fallback):
+        card = detected[idx]
+        best = card_index.search(primary_embs[idx], top_k=top_n, threshold=threshold)
+        for k in range(3):
+            emb = fallback_embs[j * 3 + k]
+            matches = card_index.search(emb, top_k=top_n, threshold=threshold)
+            if matches and (not best or matches[0].distance > best[0].distance):
+                best = matches
+        results.append((idx, card, best))
+
+    return results
+
+
 def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     detected: list[DetectedCard],
     *,
@@ -466,9 +517,14 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
 ) -> list[list[MatchResult]]:
     """CNN embedding + FAISS search pipeline.
 
-    For each detected card, tries 0° and 180° orientations at both
-    full frame and center-crop.  Duplicate detections of the same
-    physical card are resolved by keeping the highest-scoring match.
+    Uses a two-phase early-exit strategy with batch inference:
+
+    1. Batch-embed all detections at 0° full-frame.  Cards that match
+       confidently are done; the rest are queued for fallback variants.
+    2. For remaining cards, batch the fallback variants (180 deg, center-
+       crop x 0 deg, center-crop x 180 deg) and search.
+    3. Deduplicate — sort all candidates by best score (descending),
+       then emit results skipping overlapping regions (IoU > 0.5).
     """
     # Lazy imports to avoid loading ONNX Runtime when using hash backend.
     # pylint: disable=import-outside-toplevel
@@ -488,27 +544,35 @@ def _run_cnn_pipeline(  # pylint: disable=too-many-locals
     if confident_threshold == 25.0:
         confident_threshold = _CNN_CONFIDENT_THRESHOLD
 
-    # Phase 1: collect best match per detection across orientations
-    # and center-crop variants.
     candidates: list[tuple[int, DetectedCard, list[MatchResult]]] = []
 
     try:
-        for i, card in enumerate(detected):
-            best: list[MatchResult] = []
+        # --- Phase 1: batch-embed 0° full-frame, early-exit confident ---
+        primary_embs = embedder.embed_batch([c.image for c in detected])
+        need_fallback: list[int] = []
 
-            for variant in (card.image, _center_crop(card.image, _CNN_CENTER_CROP)):
-                for img in (
-                    variant,
-                    np.asarray(cv2.rotate(variant, cv2.ROTATE_180), dtype=np.uint8),
-                ):
-                    emb = embedder.embed(img)
-                    matches = card_index.search(emb, top_k=top_n, threshold=threshold)
-                    if matches and (not best or matches[0].distance > best[0].distance):
-                        best = matches
+        for i, (card, emb) in enumerate(zip(detected, primary_embs, strict=True)):
+            matches = card_index.search(emb, top_k=top_n, threshold=threshold)
+            if matches and matches[0].distance >= confident_threshold:
+                candidates.append((i, card, matches))
+            else:
+                need_fallback.append(i)
 
-            candidates.append((i, card, best))
+        # --- Phase 2: batch fallback variants for remaining cards ---
+        if need_fallback:
+            candidates.extend(
+                _cnn_fallback_variants(
+                    detected,
+                    need_fallback,
+                    primary_embs,
+                    embedder,
+                    card_index,
+                    top_n,
+                    threshold,
+                )
+            )
 
-        # Phase 2: deduplicate — highest scoring first.
+        # --- Phase 3: deduplicate — highest scoring first ---
         candidates.sort(key=lambda c: c[2][0].distance if c[2] else -1.0, reverse=True)
 
         all_results: list[list[MatchResult]] = []
