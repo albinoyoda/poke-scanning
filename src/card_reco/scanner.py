@@ -315,8 +315,15 @@ class Scanner:
         # Card tracker for temporal voting.
         self._tracker = CardTracker()
 
-        # Latest captured frame (BGR numpy array).
+        # Event signalling that CNN resources are loaded.
+        self._cnn_ready = threading.Event()
+
+        # Latest captured frame (BGR numpy array).  Written by the main-
+        # thread preview loop, read by the background scan loop.
         self._current_frame: np.ndarray | None = None
+        # Incremented each time a new frame is captured so the scan loop
+        # can skip already-processed frames.
+        self._frame_seq = 0
 
         # Scanning state.
         self._scanning = False
@@ -377,18 +384,37 @@ class Scanner:
             from card_reco.faiss_index import CardIndex
 
             self._card_index = CardIndex()
+        self._cnn_ready.set()
+
+    def _preload_cnn(self) -> None:
+        """Load CNN resources in a background thread."""
+        self._ensure_cnn_resources()
+        if self._root is not None:
+            self._root.after(0, self._on_cnn_loaded)
+
+    def _on_cnn_loaded(self) -> None:
+        """Update UI after CNN resources finish loading (main thread)."""
+        if self._debug_text is not None:
+            self._debug_text.delete("1.0", tk.END)
+            self._debug_text.insert(tk.END, "CNN model loaded. Ready to scan.\n")
 
     def _scan_loop(self) -> None:
         """Continuous detect-identify-track loop (background thread)."""
-        self._ensure_cnn_resources()
+        self._cnn_ready.wait()
         assert self._embedder is not None
         assert self._card_index is not None
 
+        last_seq = -1
         while self._scanning:
-            try:
-                frame = self._capture_frame()
-            except Exception:  # pylint: disable=broad-except
+            # Grab the latest frame captured by the main-thread preview.
+            with self._lock:
+                frame = self._current_frame
+                seq = self._frame_seq
+
+            if frame is None or seq == last_seq:
+                time.sleep(0.01)
                 continue
+            last_seq = seq
 
             t0 = time.perf_counter()
             detections = detect_cards(frame, max_detect_dim=1024, fast=True)
@@ -405,7 +431,6 @@ class Scanner:
             self._tracker.update(pairs)
 
             with self._lock:
-                self._current_frame = frame
                 self._scan_time_detect = t_detect
                 self._scan_time_total = t_total
                 self._scan_fps = 1.0 / max(t_total, 0.001)
@@ -437,7 +462,12 @@ class Scanner:
         self._tracker.clear()
         self._scan_btn.configure(text="Stop")
         self._debug_text.delete("1.0", tk.END)
-        self._debug_text.insert(tk.END, "Starting real-time scan...\n")
+        if not self._cnn_ready.is_set():
+            self._debug_text.insert(
+                tk.END, "Waiting for CNN model to finish loading...\n"
+            )
+        else:
+            self._debug_text.insert(tk.END, "Starting real-time scan...\n")
 
         self._scan_thread = threading.Thread(target=self._scan_loop, daemon=True)
         self._scan_thread.start()
@@ -459,24 +489,22 @@ class Scanner:
         if self._root is None or self._preview_label is None:
             return
         try:
-            if not self._scanning:
-                frame = self._capture_frame()
+            frame = self._capture_frame()
+            with self._lock:
                 self._current_frame = frame
-            else:
-                frame = self._current_frame
+                self._frame_seq += 1
 
-            if frame is not None:
-                vis = frame
-                # When scanning, overlay tracked cards on the preview.
-                if self._scanning:
-                    display = self._tracker.get_display_data()
-                    if display:
-                        vis = self._draw_tracked(frame, display)
+            vis = frame
+            # When scanning, overlay tracked cards on the preview.
+            if self._scanning:
+                display = self._tracker.get_display_data()
+                if display:
+                    vis = self._draw_tracked(frame, display)
 
-                small = _scale_image(vis, _PANEL_MAX_W, _PANEL_MAX_H)
-                photo = _bgr_to_photoimage(small)
-                self._preview_label.configure(image=photo)
-                self._photo_refs["preview"] = photo
+            small = _scale_image(vis, _PANEL_MAX_W, _PANEL_MAX_H)
+            photo = _bgr_to_photoimage(small)
+            self._preview_label.configure(image=photo)
+            self._photo_refs["preview"] = photo
         except Exception:  # pylint: disable=broad-except
             pass  # capture errors are non-fatal
 
@@ -600,9 +628,10 @@ class Scanner:
         self._scan_btn = ttk.Button(btn_frame, text="Scan", command=self._on_scan)
         self._scan_btn.pack(pady=10, ipadx=20, ipady=10)
 
-        # Pre-load CNN resources so the first scan is fast.
+        # Pre-load CNN resources in background so the GUI stays responsive.
         if self._backend == "cnn":
-            self._ensure_cnn_resources()
+            self._debug_text.insert(tk.END, "Loading CNN model and card index...\n")
+            threading.Thread(target=self._preload_cnn, daemon=True).start()
 
         # Start live preview loop.
         self._root.after(0, self._refresh_preview)
