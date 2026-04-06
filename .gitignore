@@ -18,6 +18,9 @@ venv/
 Thumbs.db
 .DS_Store
 
+# Data - reference images (build-time only, not needed at runtime)
+data/images/
+
 # Test artifacts
 .pytest_cache/
 .mypy_cache/
